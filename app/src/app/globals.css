@@ -1,0 +1,107 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  /* ECIT brand colors */
+  --color-navy: #03223F;
+  --color-navy-light: #002C55;
+  --color-beige: #F4EDDC;
+  --color-beige-light: #FBF7EF;
+  --color-sand: #B4A78D;
+  --color-cream: #E9E0C8;
+  --color-ecit-blue: #57A5E4;
+  --color-ecit-red: #BE3030;
+  --color-ecit-purple: #3E417F;
+  --color-positive: #3A7D3A;
+  --color-negative: #BE3030;
+}
+
+:root {
+  --radius: 0.375rem;
+  /* ECIT-inspired light theme: warm beige background, navy accents */
+  --background: #FBF7EF;
+  --foreground: #03223F;
+  --card: #FFFFFF;
+  --card-foreground: #03223F;
+  --popover: #FFFFFF;
+  --popover-foreground: #03223F;
+  --primary: #03223F;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F4EDDC;
+  --secondary-foreground: #03223F;
+  --muted: #F4EDDC;
+  --muted-foreground: #4A5568;
+  --accent: #F4EDDC;
+  --accent-foreground: #03223F;
+  --destructive: #BE3030;
+  --border: #E9E0C8;
+  --input: #E9E0C8;
+  --ring: #57A5E4;
+  /* Chart colors: ECIT palette */
+  --chart-1: #03223F;
+  --chart-2: #57A5E4;
+  --chart-3: #3E417F;
+  --chart-4: #BE3030;
+  --chart-5: #B4A78D;
+  /* Sidebar: navy dark */
+  --sidebar: #03223F;
+  --sidebar-foreground: rgba(255, 255, 255, 0.85);
+  --sidebar-primary: #57A5E4;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: rgba(255, 255, 255, 0.08);
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #57A5E4;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

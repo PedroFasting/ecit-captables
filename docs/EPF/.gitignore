@@ -1,0 +1,22 @@
+# EPF Instance .gitignore
+
+# Only track the ecit-captables instance
+_instances/*
+!_instances/ecit-captables
+!_instances/ecit-captables/**
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Temporary files
+*.tmp
+*.bak
+*.log
