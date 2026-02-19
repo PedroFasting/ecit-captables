@@ -46,7 +46,7 @@ async function getCompanies(search?: string) {
     })
     .from(companies)
     .where(conditions.length > 0 ? conditions[0] : undefined)
-    .orderBy(companies.name);
+    .orderBy(sql`${companies.totalShares} desc nulls last`);
 
   return rows;
 }

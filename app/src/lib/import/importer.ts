@@ -143,7 +143,12 @@ async function upsertShareClasses(
   parsed: ParsedCompany,
   companyId: string
 ): Promise<Map<string, string>> {
-  // Delete existing classes for this company and re-create
+  // Delete existing holdings for this company first (they reference share classes)
+  await db
+    .delete(holdings)
+    .where(eq(holdings.companyId, companyId));
+
+  // Now safe to delete share classes
   await db
     .delete(shareClasses)
     .where(eq(shareClasses.companyId, companyId));

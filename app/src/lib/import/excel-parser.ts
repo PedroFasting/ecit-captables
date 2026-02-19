@@ -363,7 +363,18 @@ function col(colMap: Map<string, number>, name: string): number {
 
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
-  const n = typeof value === "number" ? value : parseFloat(String(value));
+  if (typeof value === "number") return isNaN(value) ? null : value;
+
+  let s = String(value).trim();
+
+  // Strip currency prefixes like "NOK " or "USD "
+  s = s.replace(/^[A-Z]{3}\s+/, "");
+  // Strip percentage suffixes like "53.2%"
+  s = s.replace(/%$/, "");
+  // Strip thousands separators (commas and spaces between digits)
+  s = s.replace(/,/g, "").replace(/(?<=\d)\s+(?=\d)/g, "");
+
+  const n = parseFloat(s);
   return isNaN(n) ? null : n;
 }
 

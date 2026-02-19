@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ShareholderSearch } from "./search";
+import { APP_LOCALE } from "@/lib/utils";
 
 async function getShareholders(search?: string, type?: string) {
   const conditions = [];
@@ -39,12 +40,13 @@ async function getShareholders(search?: string, type?: string) {
       country: shareholders.country,
       companiesCount: sql<number>`count(distinct ${holdings.companyId})`,
       totalHoldings: sql<number>`count(${holdings.id})`,
+      totalShares: sql<number>`coalesce(sum(${holdings.numShares}), 0)`,
     })
     .from(shareholders)
     .leftJoin(holdings, eq(holdings.shareholderId, shareholders.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .groupBy(shareholders.id)
-    .orderBy(shareholders.canonicalName);
+    .orderBy(sql`coalesce(sum(${holdings.numShares}), 0) desc`);
 
   return rows;
 }
@@ -119,6 +121,14 @@ export default async function ShareholdersPage({
                   <Badge variant="secondary" className="text-xs">
                     {sh.entityType === "company" ? "Company" : "Person"}
                   </Badge>
+                  <div className="text-right">
+                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Shares
+                    </p>
+                    <p className="text-base font-semibold text-navy">
+                      {Number(sh.totalShares).toLocaleString(APP_LOCALE)}
+                    </p>
+                  </div>
                   <div className="text-right">
                     <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       Companies
