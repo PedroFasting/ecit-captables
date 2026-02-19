@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { db } from "@/db";
-import { companies, shareClasses, holdings } from "@/db/schema";
-import { ilike, sql } from "drizzle-orm";
+import { companies, shareClasses, holdings, shareholders } from "@/db/schema";
+import { sql } from "drizzle-orm";
 import Link from "next/link";
 import { Building2, SearchX } from "lucide-react";
 
@@ -20,33 +20,61 @@ import { CompanySearch } from "./search";
 import { APP_LOCALE } from "@/lib/utils";
 
 async function getCompanies(search?: string) {
-  const conditions = [];
-  if (search) {
-    conditions.push(
-      sql`(${ilike(companies.name, `%${search}%`)} OR ${ilike(companies.orgNumber, `%${search}%`)})`
-    );
-  }
+  // Compute hierarchy depth using a recursive CTE on the ownership graph.
+  // An ownership edge exists when a shareholder's org_number matches a company's org_number,
+  // meaning that shareholder IS that parent company.
+  const searchFilter = search
+    ? sql`AND (c.name ILIKE ${"%" + search + "%"} OR c.org_number ILIKE ${"%" + search + "%"})`
+    : sql``;
 
-  // Fix: use subqueries to avoid JOIN multiplication
-  const rows = await db
-    .select({
-      id: companies.id,
-      name: companies.name,
-      orgNumber: companies.orgNumber,
-      shareCapital: companies.shareCapital,
-      totalShares: companies.totalShares,
-      shareClassCount: sql<number>`(
-        SELECT count(*) FROM ${shareClasses}
-        WHERE ${shareClasses.companyId} = ${companies.id}
-      )`,
-      shareholderCount: sql<number>`(
-        SELECT count(DISTINCT ${holdings.shareholderId}) FROM ${holdings}
-        WHERE ${holdings.companyId} = ${companies.id}
-      )`,
-    })
-    .from(companies)
-    .where(conditions.length > 0 ? conditions[0] : undefined)
-    .orderBy(sql`${companies.totalShares} desc nulls last`);
+  const rows = await db.execute<{
+    id: string;
+    name: string;
+    org_number: string;
+    share_capital: string | null;
+    total_shares: number | null;
+    share_class_count: number;
+    shareholder_count: number;
+    hierarchy_depth: number;
+  }>(sql`
+    WITH RECURSIVE ownership_edges AS (
+      SELECT DISTINCT
+        parent_co.id AS parent_id,
+        h.company_id AS child_id
+      FROM ${holdings} h
+      INNER JOIN ${shareholders} s ON s.id = h.shareholder_id
+      INNER JOIN ${companies} parent_co ON parent_co.org_number = s.org_number
+      WHERE parent_co.id != h.company_id
+    ),
+    roots AS (
+      SELECT c.id, 0 AS depth
+      FROM ${companies} c
+      WHERE c.id NOT IN (SELECT child_id FROM ownership_edges)
+    ),
+    hierarchy AS (
+      SELECT id, depth FROM roots
+      UNION ALL
+      SELECT e.child_id, h.depth + 1
+      FROM ownership_edges e
+      INNER JOIN hierarchy h ON h.id = e.parent_id
+    ),
+    depths AS (
+      SELECT id, MIN(depth) AS depth FROM hierarchy GROUP BY id
+    )
+    SELECT
+      c.id,
+      c.name,
+      c.org_number,
+      c.share_capital,
+      c.total_shares,
+      (SELECT count(*) FROM ${shareClasses} sc WHERE sc.company_id = c.id)::int AS share_class_count,
+      (SELECT count(DISTINCT h2.shareholder_id) FROM ${holdings} h2 WHERE h2.company_id = c.id)::int AS shareholder_count,
+      COALESCE(d.depth, 99) AS hierarchy_depth
+    FROM ${companies} c
+    LEFT JOIN depths d ON d.id = c.id
+    WHERE 1=1 ${searchFilter}
+    ORDER BY COALESCE(d.depth, 99), c.name
+  `);
 
   return rows;
 }
@@ -97,7 +125,7 @@ export default async function CompaniesPage({
                   <div>
                     <p className="font-medium text-navy">{company.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      Org. {company.orgNumber}
+                      Org. {company.org_number}
                     </p>
                   </div>
                 </div>
@@ -107,7 +135,7 @@ export default async function CompaniesPage({
                       Shareholders
                     </p>
                     <p className="text-lg font-semibold text-navy">
-                      {company.shareholderCount}
+                      {company.shareholder_count}
                     </p>
                   </div>
                   <div className="text-right">
@@ -115,16 +143,16 @@ export default async function CompaniesPage({
                       Share Classes
                     </p>
                     <p className="text-lg font-semibold text-navy">
-                      {company.shareClassCount}
+                      {company.share_class_count}
                     </p>
                   </div>
-                  {company.totalShares && (
+                  {company.total_shares && (
                     <div className="text-right">
                       <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                         Total Shares
                       </p>
                       <p className="text-lg font-semibold text-navy">
-                        {Number(company.totalShares).toLocaleString(APP_LOCALE)}
+                        {Number(company.total_shares).toLocaleString(APP_LOCALE)}
                       </p>
                     </div>
                   )}

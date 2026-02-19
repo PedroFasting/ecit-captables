@@ -11,9 +11,10 @@ import {
   companies,
   shareholders,
   holdings,
+  shareClasses,
   importBatches,
 } from "@/db/schema";
-import { sql } from "drizzle-orm";
+import { eq, sql, desc } from "drizzle-orm";
 import {
   Building2,
   Users,
@@ -67,19 +68,31 @@ async function getStats() {
       ) sub`
     );
 
-  const topShareholders = await db
-    .select({
-      id: shareholders.id,
-      canonicalName: shareholders.canonicalName,
-      orgNumber: shareholders.orgNumber,
-      entityType: shareholders.entityType,
-      companiesCount: sql<number>`count(distinct ${holdings.companyId})`,
-    })
-    .from(shareholders)
-    .innerJoin(holdings, sql`${holdings.shareholderId} = ${shareholders.id}`)
-    .groupBy(shareholders.id)
-    .orderBy(sql`count(distinct ${holdings.companyId}) desc`)
-    .limit(10);
+  // Top shareholders in the top-level company (most shares, descending)
+  // Find the top company: the one with the most total shares (TopCo)
+  const [topCompany] = await db
+    .select({ id: companies.id, name: companies.name })
+    .from(companies)
+    .orderBy(sql`${companies.totalShares} desc nulls last`)
+    .limit(1);
+
+  const topShareholders = topCompany
+    ? await db
+        .select({
+          id: shareholders.id,
+          canonicalName: shareholders.canonicalName,
+          orgNumber: shareholders.orgNumber,
+          entityType: shareholders.entityType,
+          totalShares: sql<number>`coalesce(sum(${holdings.numShares}), 0)`,
+          ownershipPct: sql<string>`round(sum(${holdings.ownershipPct}::numeric), 2)`,
+        })
+        .from(holdings)
+        .innerJoin(shareholders, eq(holdings.shareholderId, shareholders.id))
+        .where(eq(holdings.companyId, topCompany.id))
+        .groupBy(shareholders.id)
+        .orderBy(sql`sum(${holdings.numShares}) desc`)
+        .limit(10)
+    : [];
 
   const lastImport = await db
     .select({
@@ -104,6 +117,7 @@ async function getStats() {
     companyEntities: entityMap["company"] ?? 0,
     personEntities: entityMap["person"] ?? 0,
     crossOwners: crossOwners.count,
+    topCompanyName: topCompany?.name ?? null,
     topShareholders,
     lastImport: lastImport[0] ?? null,
   };
@@ -165,7 +179,9 @@ export default async function DashboardPage() {
               Top Shareholders
             </CardTitle>
             <CardDescription>
-              By number of companies they hold shares in
+              {stats.topCompanyName
+                ? `Largest shareholders in ${stats.topCompanyName}`
+                : "Largest shareholders by shares held"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -191,13 +207,18 @@ export default async function DashboardPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     <Badge variant="secondary" className="text-xs">
                       {s.entityType === "company" ? "Company" : "Person"}
                     </Badge>
-                    <span className="text-sm font-semibold text-navy">
-                      {s.companiesCount}
-                    </span>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-navy">
+                        {Number(s.totalShares).toLocaleString(APP_LOCALE)}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {s.ownershipPct}%
+                      </p>
+                    </div>
                   </div>
                 </Link>
               ))}
