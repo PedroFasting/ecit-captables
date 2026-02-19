@@ -14,20 +14,21 @@ export function normalizeOrgNumber(orgNumber: string | null): string | null {
 
   let normalized = orgNumber.replace(/[\s-]/g, "");
 
-  // Handle Danish org numbers: "DK" prefix or pure digits that match Danish format
-  // Danish CVR numbers are 8 digits
+  // Swedish org numbers: keep SE prefix as-is
   if (normalized.startsWith("SE")) {
-    // Swedish - keep as-is
     return normalized;
   }
 
+  // Danish org numbers: always normalize to "DK" prefix
+  // Danish CVR numbers are 8 digits; Norwegian are 9 digits
   if (normalized.startsWith("DK")) {
-    // Already prefixed
     return normalized;
   }
 
-  // 8-digit number without prefix could be Danish (if appears in context)
-  // We'll handle this via context in the importer
+  // Pure 8-digit number → Danish CVR, add DK prefix for consistent matching
+  if (/^\d{8}$/.test(normalized)) {
+    return `DK${normalized}`;
+  }
 
   return normalized;
 }
@@ -62,16 +63,105 @@ export function normalizeEmail(email: string | null): string | null {
 }
 
 /**
+ * Common company name suffixes across jurisdictions.
+ * Used as a fallback heuristic when neither org number nor date of birth is present.
+ */
+const COMPANY_SUFFIXES = [
+  // Nordic
+  "as",
+  "asa",
+  "ans",
+  "da",
+  "ks",
+  "stiftelse",
+  "a/s",
+  "aps",
+  "ivs",
+  "ab",
+  "hb",
+  "kb",
+  "oy",
+  "oyj",
+  // Dutch / Belgian
+  "b.v.",
+  "bv",
+  "n.v.",
+  "nv",
+  "vof",
+  // German / Austrian / Swiss
+  "gmbh",
+  "ag",
+  "kg",
+  "ohg",
+  "e.v.",
+  "mbh",
+  "ug",
+  // UK / US / Ireland
+  "ltd",
+  "ltd.",
+  "limited",
+  "plc",
+  "llp",
+  "llc",
+  "inc",
+  "inc.",
+  "corp",
+  "corp.",
+  "lp",
+  "l.p.",
+  // French
+  "sa",
+  "sas",
+  "sarl",
+  "sca",
+  // Other
+  "holding",
+  "holdings",
+  "invest",
+  "group",
+  "fund",
+  "capital",
+  "partners",
+  "ventures",
+  "trust",
+];
+
+/**
+ * Check if a name looks like a company name based on common suffixes.
+ */
+function looksLikeCompanyName(name: string): boolean {
+  const lower = name.trim().toLowerCase();
+  const words = lower.split(/\s+/);
+  const lastWord = words[words.length - 1];
+  // Also check the last two "words" for things like "b.v." preceded by a number
+  const lastTwo = words.slice(-2).join(" ");
+
+  return COMPANY_SUFFIXES.some(
+    (suffix) =>
+      lastWord === suffix ||
+      lastTwo.endsWith(suffix) ||
+      // Handle patterns like "Something I B.V." or "Holdings 1 B.V."
+      lower.endsWith(` ${suffix}`) ||
+      lower.endsWith(` ${suffix}.`)
+  );
+}
+
+/**
  * Determine entity type from parsed data.
- * If org number looks like a company reg number, it's a company.
- * If it looks like a date of birth, it's a person.
+ * Priority:
+ *  1. Has date of birth → person
+ *  2. Has org number → company
+ *  3. Name matches company suffix heuristics → company
+ *  4. Default → person
  */
 export function determineEntityType(
   orgNumber: string | null,
-  dateOfBirth: string | null
+  dateOfBirth: string | null,
+  name?: string
 ): "company" | "person" {
   if (dateOfBirth) return "person";
   if (orgNumber) return "company";
+  if (name && looksLikeCompanyName(name)) return "company";
   // Default to person if we can't determine
   return "person";
 }

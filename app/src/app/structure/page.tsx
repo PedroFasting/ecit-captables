@@ -90,6 +90,8 @@ async function getStructure() {
     const existing = edgeSummary.get(key);
     if (existing) {
       existing.totalShares += row.numShares ?? 0;
+      // Ownership % is shareholder-level, pick first non-null
+      if (!existing.ownershipPct && row.ownershipPct) existing.ownershipPct = row.ownershipPct;
     } else {
       edgeSummary.set(key, {
         parentId: parent.id,

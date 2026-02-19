@@ -12,7 +12,7 @@ import {
   holdings,
   importBatches,
 } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { parseExcelFile, type ParsedCompany, type ParsedShareholder } from "./excel-parser";
 import {
   normalizeOrgNumber,
@@ -184,7 +184,7 @@ async function importShareholder(
   batchId: string,
   conflicts: ImportConflict[]
 ): Promise<{ holdingsCreated: number }> {
-  const entityType = determineEntityType(parsed.orgNumber, parsed.dateOfBirth);
+  const entityType = determineEntityType(parsed.orgNumber, parsed.dateOfBirth, parsed.name);
   const normalizedOrg = normalizeOrgNumber(parsed.orgNumber);
   const normalizedName = normalizeNameForComparison(parsed.name);
 
@@ -323,7 +323,10 @@ async function importShareholder(
   let holdingsCreated = 0;
 
   if (parsed.classHoldings.length > 0) {
-    // Multi-class: one holding per class
+    // Multi-class: one holding per class.
+    // Ownership % and voting power % are shareholder-level totals (not per-class),
+    // so we only store them on the first holding row to avoid double-counting.
+    let isFirst = true;
     for (const ch of parsed.classHoldings) {
       if (!ch.numShares || ch.numShares === 0) continue;
 
@@ -333,8 +336,8 @@ async function importShareholder(
         companyId,
         shareClassId,
         numShares: ch.numShares,
-        ownershipPct: parsed.ownershipPct?.toString() ?? null,
-        votingPowerPct: parsed.votingPowerPct?.toString() ?? null,
+        ownershipPct: isFirst ? (parsed.ownershipPct?.toString() ?? null) : null,
+        votingPowerPct: isFirst ? (parsed.votingPowerPct?.toString() ?? null) : null,
         totalCostPrice: ch.totalCostPrice?.toString() ?? null,
         entryDate: ch.entryDate,
         shareNumbers: ch.shareNumbers,
@@ -343,6 +346,7 @@ async function importShareholder(
         importBatchId: batchId,
       });
       holdingsCreated++;
+      isFirst = false;
     }
   } else {
     // Single class or no class info - create one holding
@@ -403,6 +407,24 @@ async function findExistingShareholder(
         return s;
       }
     }
+  }
+
+  // Strategy 3: Match on normalized name + entity type (fallback for persons
+  // without org_number or date_of_birth). Less reliable than strategies 1-2
+  // but prevents creating duplicates for the same person across files.
+  if (!orgNumber && !dateOfBirth) {
+    const byName = await db
+      .select()
+      .from(shareholders)
+      .where(
+        and(
+          eq(shareholders.entityType, entityType),
+          sql`lower(trim(${shareholders.canonicalName})) = ${normalizedName}`
+        )
+      )
+      .limit(1);
+
+    if (byName.length > 0) return byName[0];
   }
 
   return null;

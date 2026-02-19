@@ -89,8 +89,20 @@ export function parseExcelFile(buffer: Buffer): ParsedCompany {
   // Find remarks (between share classes and header row)
   const remarks = parseRemarks(rows);
   if (remarks && shareClasses.length > 0) {
-    // Attach remarks to last share class (or first - usually applies broadly)
-    shareClasses[shareClasses.length - 1].remarks = remarks;
+    // Try to match remark to correct share class by content.
+    // E.g. "A-aksjeeier kan samlet maksimalt..." → A-shares
+    const matchedClass = shareClasses.find((sc) => {
+      const classPrefix = sc.name.replace(/-?shares$/i, "").trim(); // "A", "B", "Preference", "Common"
+      // Match patterns like "A-aksjeeier", "B-aksje", "Preference share" in the remark text
+      const pattern = new RegExp(`\\b${classPrefix}[- ]?aksje`, "i");
+      return pattern.test(remarks);
+    });
+    if (matchedClass) {
+      matchedClass.remarks = remarks;
+    } else {
+      // Fallback: attach to first share class (most relevant for general remarks)
+      shareClasses[0].remarks = remarks;
+    }
   }
 
   // Find header row and parse shareholders

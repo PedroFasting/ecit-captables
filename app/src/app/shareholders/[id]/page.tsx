@@ -104,6 +104,8 @@ async function getShareholderDetail(id: string) {
       orgNumber: string;
       holdings: typeof holdingRows;
       totalShares: number;
+      ownershipPct: string | null;
+      votingPowerPct: string | null;
     }
   >();
 
@@ -112,6 +114,9 @@ async function getShareholderDetail(id: string) {
     if (existing) {
       existing.holdings.push(row);
       existing.totalShares += row.numShares ?? 0;
+      // Ownership/voting are shareholder-level (not per-class), pick first non-null
+      if (!existing.ownershipPct && row.ownershipPct) existing.ownershipPct = row.ownershipPct;
+      if (!existing.votingPowerPct && row.votingPowerPct) existing.votingPowerPct = row.votingPowerPct;
     } else {
       companiesMap.set(row.companyId, {
         id: row.companyId,
@@ -119,6 +124,8 @@ async function getShareholderDetail(id: string) {
         orgNumber: row.companyOrgNumber,
         holdings: [row],
         totalShares: row.numShares ?? 0,
+        ownershipPct: row.ownershipPct,
+        votingPowerPct: row.votingPowerPct,
       });
     }
   }
@@ -245,17 +252,27 @@ export default async function ShareholderDetailPage({
                 >
                   {comp.name}
                 </Link>
-                <span className="text-xs text-muted-foreground">
-                  {comp.orgNumber}
-                </span>
+                <div className="flex items-center gap-4">
+                  {comp.ownershipPct && (
+                    <span className="text-sm text-muted-foreground">
+                      Ownership: <span className="font-medium text-navy">{formatPct(comp.ownershipPct)}</span>
+                    </span>
+                  )}
+                  {comp.votingPowerPct && (
+                    <span className="text-sm text-muted-foreground">
+                      Voting: <span className="font-medium text-navy">{formatPct(comp.votingPowerPct)}</span>
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {comp.orgNumber}
+                  </span>
+                </div>
               </div>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Share Class</TableHead>
                     <TableHead className="text-right">Shares</TableHead>
-                    <TableHead className="text-right">Ownership</TableHead>
-                    <TableHead className="text-right">Voting Power</TableHead>
                     <TableHead>Entry Date</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -269,12 +286,6 @@ export default async function ShareholderDetailPage({
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {(h.numShares ?? 0).toLocaleString(APP_LOCALE)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatPct(h.ownershipPct)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatPct(h.votingPowerPct)}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {h.entryDate || "—"}

@@ -9,6 +9,7 @@ import {
 import { eq, sql, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { GitFork, Building2, User } from "lucide-react";
+import { APP_LOCALE } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -165,30 +166,43 @@ export default async function CrossOwnershipPage() {
                       });
                     }
                   }
-                  return Array.from(byCompany.values()).map((comp) => (
-                    <Link
-                      key={comp.id}
-                      href={`/companies/${comp.id}`}
-                      className="rounded-md border border-cream bg-beige-light p-3 transition-colors hover:border-ecit-blue/30"
-                    >
-                      <p className="text-sm font-medium text-navy">
-                        {comp.name}
-                      </p>
-                      <div className="mt-1 space-y-0.5">
-                        {comp.holdings.map((h, i) => (
-                          <div
-                            key={i}
-                            className="flex items-center justify-between text-xs text-muted-foreground"
-                          >
-                            <span>{h.shareClassName || "Common"}</span>
-                            <span className="font-medium text-navy">
-                              {formatPct(h.ownershipPct)}
+                  return Array.from(byCompany.values()).map((comp) => {
+                    // Ownership % is shareholder-level, pick first non-null
+                    const ownershipPct = comp.holdings.find(
+                      (h) => h.ownershipPct
+                    )?.ownershipPct;
+                    return (
+                      <Link
+                        key={comp.id}
+                        href={`/companies/${comp.id}`}
+                        className="rounded-md border border-cream bg-beige-light p-3 transition-colors hover:border-ecit-blue/30"
+                      >
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-navy">
+                            {comp.name}
+                          </p>
+                          {ownershipPct && (
+                            <span className="text-xs font-medium text-navy">
+                              {formatPct(ownershipPct)}
                             </span>
-                          </div>
-                        ))}
-                      </div>
-                    </Link>
-                  ));
+                          )}
+                        </div>
+                        <div className="mt-1 space-y-0.5">
+                          {comp.holdings.map((h, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between text-xs text-muted-foreground"
+                            >
+                              <span>{h.shareClassName || "Common"}</span>
+                              <span>
+                                {(h.numShares ?? 0).toLocaleString(APP_LOCALE)} shares
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </Link>
+                    );
+                  });
                 })()}
               </div>
             </CardContent>

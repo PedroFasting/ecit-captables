@@ -6,10 +6,11 @@ import {
   holdings,
   shareholders,
 } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Building2, Users, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ShareholderTable } from "./shareholder-table";
 import { APP_LOCALE } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -37,9 +38,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -48,7 +47,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 async function getCompanyDetail(id: string) {
   const company = await db
@@ -97,7 +95,8 @@ async function getCompanyDetail(id: string) {
       country: string | null;
       holdings: typeof holdingRows;
       totalShares: number;
-      totalOwnershipPct: number;
+      ownershipPct: string | null;
+      votingPowerPct: string | null;
     }
   >();
 
@@ -106,7 +105,9 @@ async function getCompanyDetail(id: string) {
     if (existing) {
       existing.holdings.push(row);
       existing.totalShares += row.numShares ?? 0;
-      existing.totalOwnershipPct += parseFloat(row.ownershipPct ?? "0");
+      // Ownership/voting % are shareholder-level (not per-class), pick first non-null
+      if (!existing.ownershipPct && row.ownershipPct) existing.ownershipPct = row.ownershipPct;
+      if (!existing.votingPowerPct && row.votingPowerPct) existing.votingPowerPct = row.votingPowerPct;
     } else {
       shareholderMap.set(row.shareholderId, {
         id: row.shareholderId,
@@ -116,7 +117,8 @@ async function getCompanyDetail(id: string) {
         country: row.country,
         holdings: [row],
         totalShares: row.numShares ?? 0,
-        totalOwnershipPct: parseFloat(row.ownershipPct ?? "0"),
+        ownershipPct: row.ownershipPct,
+        votingPowerPct: row.votingPowerPct,
       });
     }
   }
@@ -277,70 +279,21 @@ export default async function CompanyDetailPage({
       )}
 
       {/* Shareholders */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Shareholders</CardTitle>
-          <CardDescription>
-            {data.shareholders.length} shareholders sorted by number of shares
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Shareholder</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead className="text-right">Shares</TableHead>
-                <TableHead className="text-right">Ownership</TableHead>
-                <TableHead>Share Classes</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.shareholders.map((sh) => (
-                <TableRow key={sh.id}>
-                  <TableCell>
-                    <Link
-                      href={`/shareholders/${sh.id}`}
-                      className="font-medium text-navy hover:underline"
-                    >
-                      {sh.name}
-                    </Link>
-                    {sh.orgNumber && (
-                      <p className="text-xs text-muted-foreground">
-                        {sh.orgNumber}
-                      </p>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="text-xs">
-                      {sh.entityType === "company" ? "Company" : "Person"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-medium">
-                    {formatNumber(sh.totalShares)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatPct(sh.totalOwnershipPct)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {sh.holdings.map((h) => (
-                        <Badge
-                          key={h.holdingId}
-                          variant="outline"
-                          className="text-[10px]"
-                        >
-                          {h.shareClassName || "Common"}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <ShareholderTable
+        shareholders={data.shareholders.map((sh) => ({
+          ...sh,
+          holdings: sh.holdings.map((h) => ({
+            holdingId: h.holdingId,
+            shareClassId: h.shareClassId,
+            shareClassName: h.shareClassName,
+            numShares: h.numShares,
+          })),
+        }))}
+        shareClasses={data.shareClasses.map((sc) => ({
+          id: sc.id,
+          name: sc.name,
+        }))}
+      />
     </div>
   );
 }

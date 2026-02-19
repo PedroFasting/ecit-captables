@@ -10,7 +10,15 @@ import { readFileSync, readdirSync } from "fs";
 import { resolve, join } from "path";
 import { importExcelFile, type ImportResult } from "../src/lib/import/importer";
 import { db } from "../src/db";
-import { shareholderAliases, shareholderContacts } from "../src/db/schema";
+import {
+  shareholderAliases,
+  shareholderContacts,
+  shareholders,
+  holdings,
+  shareClasses,
+  importBatches,
+  companies,
+} from "../src/db/schema";
 
 const EXCEL_DIR = resolve(__dirname, "../../Aksjeeierbøker");
 
@@ -18,10 +26,15 @@ async function main() {
   console.log("=== ECIT Cap Tables Seed ===\n");
   console.log(`Reading Excel files from: ${EXCEL_DIR}\n`);
 
-  // Clean stale aliases and contacts from previous runs
+  // Full clean: delete everything in FK-safe order for a fresh import
+  await db.delete(holdings);
   await db.delete(shareholderAliases);
   await db.delete(shareholderContacts);
-  console.log("Cleared existing aliases and contacts.\n");
+  await db.delete(shareholders);
+  await db.delete(shareClasses);
+  await db.delete(importBatches);
+  await db.delete(companies);
+  console.log("Cleared all existing data for fresh import.\n");
 
   const files = readdirSync(EXCEL_DIR)
     .filter((f) => f.endsWith(".xlsx"))

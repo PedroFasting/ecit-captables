@@ -84,7 +84,7 @@ async function getStats() {
           orgNumber: shareholders.orgNumber,
           entityType: shareholders.entityType,
           totalShares: sql<number>`coalesce(sum(${holdings.numShares}), 0)`,
-          ownershipPct: sql<string>`round(sum(${holdings.ownershipPct}::numeric), 2)`,
+          ownershipPct: sql<string>`round(max(${holdings.ownershipPct}::numeric), 2)`,
         })
         .from(holdings)
         .innerJoin(shareholders, eq(holdings.shareholderId, shareholders.id))
