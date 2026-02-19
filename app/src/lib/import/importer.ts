@@ -241,7 +241,15 @@ async function importShareholder(
     shareholder = created;
   }
 
-  // Add alias for this specific appearance
+  // Add alias for this specific appearance (dedup: remove existing from same source first)
+  await db
+    .delete(shareholderAliases)
+    .where(
+      and(
+        eq(shareholderAliases.shareholderId, shareholder.id),
+        eq(shareholderAliases.sourceCompanyId, companyId)
+      )
+    );
   await db.insert(shareholderAliases).values({
     shareholderId: shareholder.id,
     nameVariant: parsed.name,
@@ -249,11 +257,11 @@ async function importShareholder(
     sourceCompanyId: companyId,
   });
 
-  // Add/update contact info
+  // Add/update contact info (dedup: remove existing for this shareholder+company first)
   if (parsed.email || parsed.phone || parsed.address) {
     const normalizedEmail = normalizeEmail(parsed.email);
 
-    // Check for email conflicts
+    // Check for email conflicts against other sources
     if (normalizedEmail) {
       const existingContacts = await db
         .select()
@@ -277,13 +285,28 @@ async function importShareholder(
       }
     }
 
-    await db.insert(shareholderContacts).values({
-      shareholderId: shareholder.id,
-      email: normalizedEmail,
-      phone: parsed.phone,
-      address: parsed.address,
-      isPrimary: false,
-    });
+    // Upsert: check if identical contact already exists
+    const existingContact = await db
+      .select()
+      .from(shareholderContacts)
+      .where(eq(shareholderContacts.shareholderId, shareholder.id));
+
+    const alreadyExists = existingContact.some(
+      (c) =>
+        c.email === (normalizeEmail(parsed.email) ?? null) &&
+        c.phone === (parsed.phone ?? null) &&
+        c.address === (parsed.address ?? null)
+    );
+
+    if (!alreadyExists) {
+      await db.insert(shareholderContacts).values({
+        shareholderId: shareholder.id,
+        email: normalizeEmail(parsed.email),
+        phone: parsed.phone,
+        address: parsed.address,
+        isPrimary: false,
+      });
+    }
   }
 
   // Delete existing holdings for this shareholder + company (re-import)

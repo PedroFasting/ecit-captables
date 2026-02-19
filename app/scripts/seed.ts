@@ -9,12 +9,19 @@ import "dotenv/config";
 import { readFileSync, readdirSync } from "fs";
 import { resolve, join } from "path";
 import { importExcelFile, type ImportResult } from "../src/lib/import/importer";
+import { db } from "../src/db";
+import { shareholderAliases, shareholderContacts } from "../src/db/schema";
 
 const EXCEL_DIR = resolve(__dirname, "../../Aksjeeierbøker");
 
 async function main() {
   console.log("=== ECIT Cap Tables Seed ===\n");
   console.log(`Reading Excel files from: ${EXCEL_DIR}\n`);
+
+  // Clean stale aliases and contacts from previous runs
+  await db.delete(shareholderAliases);
+  await db.delete(shareholderContacts);
+  console.log("Cleared existing aliases and contacts.\n");
 
   const files = readdirSync(EXCEL_DIR)
     .filter((f) => f.endsWith(".xlsx"))
