@@ -166,12 +166,12 @@ export default async function CompanyDetailPage({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <a
-              href={`https://www.proff.no/selskap/-/-/${data.orgNumber.replace(/\s/g, "")}`}
+              href={`https://21st.ai/no/sok?q=${data.orgNumber.replace(/\s/g, "")}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 rounded-md border border-cream px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-beige"
             >
-              Proff.no <ExternalLink className="size-3" />
+              21st.ai <ExternalLink className="size-3" />
             </a>
             <DeleteCompanyDialog
               companyId={data.id}
