@@ -9,12 +9,30 @@ import {
   boolean,
   date,
   index,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 // ── Enums ──────────────────────────────────────────────
 
 export const entityTypeEnum = pgEnum("entity_type", ["company", "person"]);
+
+export const transactionTypeEnum = pgEnum("transaction_type", [
+  "import_diff",
+  "founding",
+  "emission",
+  "write_down",
+  "sale_transfer",
+  "inheritance",
+  "gift",
+  "split",
+  "reverse_split",
+  "conversion",
+  "redemption",
+  "merger",
+  "demerger",
+  "manual_adjustment",
+]);
 
 // ── Companies ──────────────────────────────────────────
 
@@ -34,6 +52,8 @@ export const companiesRelations = relations(companies, ({ many }) => ({
   shareClasses: many(shareClasses),
   holdings: many(holdings),
   importBatches: many(importBatches),
+  snapshots: many(snapshots),
+  transactions: many(transactions),
 }));
 
 // ── Share Classes ──────────────────────────────────────
@@ -81,6 +101,8 @@ export const shareholdersRelations = relations(shareholders, ({ many }) => ({
   aliases: many(shareholderAliases),
   contacts: many(shareholderContacts),
   holdings: many(holdings),
+  fromTransactions: many(transactions, { relationName: "fromTransactions" }),
+  toTransactions: many(transactions, { relationName: "toTransactions" }),
 }));
 
 // ── Shareholder Aliases ────────────────────────────────
@@ -193,6 +215,7 @@ export const importBatches = pgTable("import_batches", {
   companyId: uuid("company_id").references(() => companies.id),
   recordsImported: bigint("records_imported", { mode: "number" }),
   conflictsFound: bigint("conflicts_found", { mode: "number" }),
+  effectiveDate: date("effective_date"),
 }, (table) => [
   index("import_batches_company_id_idx").on(table.companyId),
 ]);
@@ -205,5 +228,103 @@ export const importBatchesRelations = relations(
       references: [companies.id],
     }),
     holdings: many(holdings),
+    snapshots: many(snapshots),
+    transactions: many(transactions),
   })
 );
+
+// ── Snapshots ──────────────────────────────────────────
+
+export const snapshots = pgTable("snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  importBatchId: uuid("import_batch_id").references(() => importBatches.id),
+  snapshotData: jsonb("snapshot_data").notNull(),
+  effectiveDate: date("effective_date").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("snapshots_company_id_idx").on(table.companyId),
+  index("snapshots_effective_date_idx").on(table.effectiveDate),
+]);
+
+export const snapshotsRelations = relations(snapshots, ({ one }) => ({
+  company: one(companies, {
+    fields: [snapshots.companyId],
+    references: [companies.id],
+  }),
+  importBatch: one(importBatches, {
+    fields: [snapshots.importBatchId],
+    references: [importBatches.id],
+  }),
+}));
+
+// ── Transactions ───────────────────────────────────────
+
+export const transactions = pgTable("transactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  type: transactionTypeEnum("type").notNull(),
+  effectiveDate: date("effective_date").notNull(),
+  description: text("description"),
+
+  // Parties
+  fromShareholderId: uuid("from_shareholder_id").references(() => shareholders.id),
+  toShareholderId: uuid("to_shareholder_id").references(() => shareholders.id),
+
+  // Share data
+  shareClassId: uuid("share_class_id").references(() => shareClasses.id),
+  numShares: bigint("num_shares", { mode: "number" }).notNull().default(0),
+  pricePerShare: numeric("price_per_share", { precision: 20, scale: 4 }),
+  totalAmount: numeric("total_amount", { precision: 20, scale: 4 }),
+  shareNumbersFrom: bigint("share_numbers_from", { mode: "number" }),
+  shareNumbersTo: bigint("share_numbers_to", { mode: "number" }),
+
+  // Before/after state
+  sharesBefore: bigint("shares_before", { mode: "number" }),
+  sharesAfter: bigint("shares_after", { mode: "number" }),
+
+  // Source tracking
+  source: text("source").notNull().default("manual"),
+  importBatchId: uuid("import_batch_id").references(() => importBatches.id),
+  documentReference: text("document_reference"),
+  metadata: jsonb("metadata"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdBy: text("created_by"),
+}, (table) => [
+  index("transactions_company_id_idx").on(table.companyId),
+  index("transactions_effective_date_idx").on(table.effectiveDate),
+  index("transactions_from_shareholder_idx").on(table.fromShareholderId),
+  index("transactions_to_shareholder_idx").on(table.toShareholderId),
+  index("transactions_type_idx").on(table.type),
+  index("transactions_import_batch_idx").on(table.importBatchId),
+]);
+
+export const transactionsRelations = relations(transactions, ({ one }) => ({
+  company: one(companies, {
+    fields: [transactions.companyId],
+    references: [companies.id],
+  }),
+  fromShareholder: one(shareholders, {
+    fields: [transactions.fromShareholderId],
+    references: [shareholders.id],
+    relationName: "fromTransactions",
+  }),
+  toShareholder: one(shareholders, {
+    fields: [transactions.toShareholderId],
+    references: [shareholders.id],
+    relationName: "toTransactions",
+  }),
+  shareClass: one(shareClasses, {
+    fields: [transactions.shareClassId],
+    references: [shareClasses.id],
+  }),
+  importBatch: one(importBatches, {
+    fields: [transactions.importBatchId],
+    references: [importBatches.id],
+  }),
+}));

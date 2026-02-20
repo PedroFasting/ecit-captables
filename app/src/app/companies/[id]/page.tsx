@@ -11,6 +11,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { ShareholderTable } from "./shareholder-table";
+import { CompanyTabs } from "./company-tabs";
 import { APP_LOCALE, formatPct, formatNumber } from "@/lib/utils";
 import {
   Card,
@@ -266,21 +267,26 @@ export default async function CompanyDetailPage({
         </Card>
       )}
 
-      {/* Shareholders */}
-      <ShareholderTable
-        shareholders={data.shareholders.map((sh) => ({
-          ...sh,
-          holdings: sh.holdings.map((h) => ({
-            holdingId: h.holdingId,
-            shareClassId: h.shareClassId,
-            shareClassName: h.shareClassName,
-            numShares: h.numShares,
-          })),
-        }))}
-        shareClasses={data.shareClasses.map((sc) => ({
-          id: sc.id,
-          name: sc.name,
-        }))}
+      {/* Tabbed Content: Shareholders + History */}
+      <CompanyTabs
+        companyId={data.id}
+        shareholdersContent={
+          <ShareholderTable
+            shareholders={data.shareholders.map((sh) => ({
+              ...sh,
+              holdings: sh.holdings.map((h) => ({
+                holdingId: h.holdingId,
+                shareClassId: h.shareClassId,
+                shareClassName: h.shareClassName,
+                numShares: h.numShares,
+              })),
+            }))}
+            shareClasses={data.shareClasses.map((sc) => ({
+              id: sc.id,
+              name: sc.name,
+            }))}
+          />
+        }
       />
     </div>
   );

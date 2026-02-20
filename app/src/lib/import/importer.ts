@@ -1,6 +1,11 @@
 /**
  * Import pipeline: orchestrates Excel parsing, normalization,
  * entity resolution, and database insertion.
+ *
+ * Two modes:
+ *  - previewImport(): Parse + diff, returns preview without DB writes
+ *  - confirmImport(): Snapshot → import → create transactions
+ *  - importExcelFile(): Legacy wrapper (backward compatible, no diff/snapshot)
  */
 import { db } from "@/db";
 import {
@@ -11,6 +16,8 @@ import {
   shareholderContacts,
   holdings,
   importBatches,
+  snapshots,
+  transactions,
 } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { parseExcelFile, type ParsedCompany, type ParsedShareholder } from "./excel-parser";
@@ -21,6 +28,8 @@ import {
   normalizeEmail,
   determineEntityType,
 } from "./normalize";
+import { captureSnapshotData, createSnapshot } from "./snapshot";
+import { calculateDiff, type ImportDiff } from "./diff";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -42,7 +51,220 @@ export interface ImportConflict {
   details: string;
 }
 
-// ── Main Import Function ───────────────────────────────
+export interface PreviewResult {
+  diff: ImportDiff;
+  parsed: ParsedCompany;
+  /** Company ID if it already exists in the DB */
+  existingCompanyId: string | null;
+}
+
+export interface ConfirmResult extends ImportResult {
+  snapshotId: string | null;
+  transactionsCreated: number;
+  diff: ImportDiff;
+}
+
+// ── Preview Import (read-only) ─────────────────────────
+
+/**
+ * Preview an import: parse Excel, diff against current DB state.
+ * No database writes. Returns the diff for user review.
+ */
+export async function previewImport(
+  buffer: Buffer,
+  _fileName: string
+): Promise<PreviewResult> {
+  const parsed = parseExcelFile(buffer);
+  const orgNum = normalizeOrgNumber(parsed.orgNumber);
+
+  if (!orgNum) {
+    throw new Error(`Company has no org number: ${parsed.name}`);
+  }
+
+  // Look up existing company
+  const [existing] = await db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(eq(companies.orgNumber, orgNum))
+    .limit(1);
+
+  // Capture current state (or null for first import)
+  let currentState = null;
+  if (existing) {
+    currentState = await captureSnapshotData(db, existing.id);
+  }
+
+  const diff = calculateDiff(currentState, parsed);
+
+  return {
+    diff,
+    parsed,
+    existingCompanyId: existing?.id ?? null,
+  };
+}
+
+// ── Confirm Import (with snapshot + transactions) ──────
+
+/**
+ * Confirmed import: snapshot current state, run the full import,
+ * then create transactions from the diff.
+ */
+export async function confirmImport(
+  buffer: Buffer,
+  fileName: string
+): Promise<ConfirmResult> {
+  const parsed = parseExcelFile(buffer);
+
+  return await db.transaction(async (tx) => {
+    const conflicts: ImportConflict[] = [];
+    const orgNum = normalizeOrgNumber(parsed.orgNumber);
+    if (!orgNum) throw new Error(`Company has no org number: ${parsed.name}`);
+
+    // Check if company exists (for snapshot before changes)
+    const [existing] = await tx
+      .select({ id: companies.id })
+      .from(companies)
+      .where(eq(companies.orgNumber, orgNum))
+      .limit(1);
+
+    // Capture current state + create pre-import snapshot
+    let snapshotId: string | null = null;
+    let currentState = null;
+    if (existing) {
+      currentState = await captureSnapshotData(tx, existing.id);
+    }
+
+    // Calculate diff before import changes the data
+    const diff = calculateDiff(currentState, parsed);
+
+    // 1. Upsert company
+    const company = await upsertCompany(tx, parsed);
+
+    // Create pre-import snapshot (now that company definitely exists)
+    if (existing && currentState && currentState.holdings.length > 0) {
+      const today = new Date().toISOString().split("T")[0];
+      snapshotId = await createSnapshot(tx, company.id, null, today);
+    }
+
+    // 2. Create import batch
+    const [batch] = await tx
+      .insert(importBatches)
+      .values({
+        sourceFile: fileName,
+        companyId: company.id,
+        recordsImported: parsed.shareholders.length,
+        conflictsFound: 0,
+        effectiveDate: new Date().toISOString().split("T")[0],
+      })
+      .returning();
+
+    // 3. Upsert share classes
+    const classMap = await upsertShareClasses(tx, parsed, company.id);
+
+    // 4. Import shareholders with entity resolution
+    let holdingsCount = 0;
+    for (const sh of parsed.shareholders) {
+      const result = await importShareholder(
+        tx,
+        sh,
+        company.id,
+        classMap,
+        batch.id,
+        conflicts
+      );
+      holdingsCount += result.holdingsCreated;
+    }
+
+    // 5. Update batch with conflict count
+    await tx
+      .update(importBatches)
+      .set({ conflictsFound: conflicts.length })
+      .where(eq(importBatches.id, batch.id));
+
+    // 6. Create transactions from diff
+    let transactionsCreated = 0;
+    const effectiveDate = new Date().toISOString().split("T")[0];
+
+    for (const change of diff.shareholderChanges) {
+      if (change.type === "unchanged") continue;
+
+      // Resolve shareholder ID for new shareholders (they were just created)
+      let toShareholderId = change.shareholderId ?? null;
+      if (!toShareholderId && change.orgNumber) {
+        const normalizedOrg = normalizeOrgNumber(change.orgNumber);
+        if (normalizedOrg) {
+          const [sh] = await tx
+            .select({ id: shareholders.id })
+            .from(shareholders)
+            .where(eq(shareholders.orgNumber, normalizedOrg))
+            .limit(1);
+          toShareholderId = sh?.id ?? null;
+        }
+      }
+      if (!toShareholderId) {
+        // Try name match
+        const normalizedName = normalizeNameForComparison(change.shareholderName);
+        const [sh] = await tx
+          .select({ id: shareholders.id })
+          .from(shareholders)
+          .where(sql`lower(trim(${shareholders.canonicalName})) = ${normalizedName}`)
+          .limit(1);
+        toShareholderId = sh?.id ?? null;
+      }
+
+      // Create one transaction per holding change
+      for (const hc of change.holdingChanges) {
+        if (hc.sharesBefore === hc.sharesAfter) continue;
+
+        // Resolve share class ID
+        let shareClassId: string | null = null;
+        if (hc.shareClassName) {
+          const scKey = hc.shareClassName;
+          shareClassId = classMap.get(scKey) ?? null;
+          if (!shareClassId) {
+            // Try case-insensitive match
+            for (const [name, id] of classMap.entries()) {
+              if (name.toLowerCase().trim() === scKey.toLowerCase().trim()) {
+                shareClassId = id;
+                break;
+              }
+            }
+          }
+        }
+
+        const isExit = change.type === "exited";
+        await tx.insert(transactions).values({
+          companyId: company.id,
+          type: "import_diff",
+          effectiveDate,
+          description: `Import: ${change.shareholderName} — ${hc.shareClassName ?? "Default"}: ${hc.sharesBefore} → ${hc.sharesAfter}`,
+          fromShareholderId: isExit ? toShareholderId : null,
+          toShareholderId: isExit ? null : toShareholderId,
+          shareClassId,
+          numShares: Math.abs(hc.sharesAfter - hc.sharesBefore),
+          sharesBefore: hc.sharesBefore,
+          sharesAfter: hc.sharesAfter,
+          source: "import",
+          importBatchId: batch.id,
+        });
+        transactionsCreated++;
+      }
+    }
+
+    return {
+      companyName: parsed.name,
+      companyOrgNumber: parsed.orgNumber,
+      shareholdersImported: parsed.shareholders.length,
+      holdingsCreated: holdingsCount,
+      conflicts,
+      snapshotId,
+      transactionsCreated,
+      diff,
+    };
+  });
+}
+
+// ── Legacy Import Function (backward compatible) ───────
 
 export async function importExcelFile(
   buffer: Buffer,

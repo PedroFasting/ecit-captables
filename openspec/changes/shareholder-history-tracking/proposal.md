@@ -11,75 +11,137 @@ ECIT Cap Tables fungerer i dag som en **snapshot viewer** — den viser siste ve
 
 For en organisasjon som ECIT med aktiv konsolidering, emisjoner, interne salg og ManCo-programmer, er det kritisk aa forstaa **hvordan** eierskapet endrer seg — ikke bare hvordan det ser ut akkurat naa.
 
+Maalbildet er en fullstendig digital aksjebok (ledger) som kan brukes til aarlig rapportering til aksjonaerregisteret via skatteetaten.no.
+
 ## Solution
 
-Utvide applikasjonen fra "snapshot viewer" til en **fullstendig aksjebok med historikk**. Hovedelementene:
+Utvide applikasjonen fra "snapshot viewer" til en **fullstendig aksjebok med historikk og transaksjonslogg**. Hovedelementene:
 
-### 1. Snapshot-basert import med diff
+### 1. Snapshot-basert import med diff (Phase A)
 
 Naar en ny Excel-fil importeres for et selskap som allerede har data:
 - Behold forrige versjon som et historisk snapshot
 - Beregn diff automatisk: nye aksjonaerer, utgaatte aksjonaerer, endringer i antall aksjer, eierandel, aksjeklasse
-- Vis endringene for brukeren foer de bekreftes
-- Logg endringene som transaksjoner (se under)
+- Vis endringene for brukeren foer de bekreftes (preview-steg)
+- Logg endringene som transaksjoner (automatisk)
+- Stotte for historisk import: last inn eldre Excel-filer med dato-parameter for aa bygge historikk bakover
 
-### 2. Transaksjonsmodell
+### 2. Transaksjonsmodell med manuell registrering og PDF-import (Phase B)
 
-En ny tabell `transactions` som logger hver endring i eierskap:
-- **Type**: `import_new` (ny aksjonaer), `import_increase` (flere aksjer), `import_decrease` (faerre aksjer), `import_exit` (aksjonaer borte), `emission` (kapitalutvidelse), `internal_sale`, `external_sale`, `split`, `conversion`, `manual_adjustment`
-- **Metadata**: Fra-aksjonaer, til-aksjonaer (for salg), antall aksjer, pris per aksje, aksjeklasse, dato, kilde (import batch eller manuell), kommentar
-- Transaksjoner utledet fra import-diff opprettes automatisk
-- Manuelle transaksjoner kan registreres direkte
+#### Norske transaksjonstyper
+
+Basert paa aksjeloven og det som rapporteres til aksjonaerregisteret:
+
+| Type | Norsk | Beskrivelse |
+|------|-------|-------------|
+| `founding` | Stiftelse | Selskapet opprettes, foerste aksjer utstedes |
+| `emission` | Emisjon / kapitalforhoeyelse | Nye aksjer utstedes, aksjekapital oekes |
+| `sale_transfer` | Salg / overdragelse | Aksjer overfoeres fra en eier til en annen |
+| `split` | Aksjesplitt | Aksjer deles opp (1:N) uten verdiendring |
+| `reverse_split` | Aksjespleis | Aksjer slaas sammen (N:1) |
+| `conversion` | Konvertering | Aksjer endrer klasse (f.eks. B -> A) |
+| `redemption` | Innloesning | Selskapet kjoeper tilbake og sletter aksjer |
+| `merger` | Fusjon | Selskaper slaas sammen, aksjer konverteres |
+| `demerger` | Fisjon | Selskap deles, aksjer fordeles |
+| `inheritance` | Arv | Aksjer overfoeres ved arv |
+| `gift` | Gave | Vederlagsfri overdragelse |
+| `write_down` | Nedskrivning | Aksjekapital settes ned |
+| `import_diff` | Import-endring | Automatisk utledet fra diff mellom to Excel-importer |
+| `manual_adjustment` | Manuell justering | Korreksjon / opprydding |
+
+#### Transaksjons-metadata
+
+Hver transaksjon inneholder:
+- **Selskap** og **aksjeklasse**
+- **Fra-aksjonaer** og **til-aksjonaer** (for salg/overdragelse)
+- **Antall aksjer**, **pris per aksje** (vederlag), **total kostpris**
+- **Aksjenummer-range** (fra-til)
+- **Dato** (effektiv dato for transaksjonen)
+- **Kilde**: import_batch (automatisk) eller manuell
+- **Dokumentreferanse**: link til PDF, vedtak, protokoll
+- **Kommentar**: fritekst
+
+#### PDF-import
+
+dcompany.no kan eksportere transaksjonshistorikk som PDF. Vi bygger en parser som:
+- Leser standard dcompany.no PDF-format for transaksjoner
+- Ekstrakter transaksjonstype, dato, aksjonaerer, antall, pris
+- Matcher mot eksisterende aksjonaerer og selskaper
+- Viser preview foer import bekreftes
+- Oppretter transaksjoner i ledger
+
+#### Manuell registrering
+
+UI for aa registrere transaksjoner direkte:
+- Typevelger med tilpassede skjemaer per transaksjonstype
+- Emisjon: antall nye aksjer, pris, tegner(e), aksjeklasse
+- Salg: selger, kjoeper, antall, pris, aksjeklasse
+- Splitt: splittfaktor, aksjeklasse
+- Validering: kan ikke selge mer enn man eier, aksjetall maa stemme
+- Transaksjonen oppdaterer holdings automatisk
 
 ### 3. Historikk-visninger
 
-- **Per selskap**: Tidslinje over endringer, graf over aksjonaersammensetning over tid
-- **Per aksjonaer**: Historikk over alle transaksjoner, eierandelsutvikling
-- **Oversikt**: Siste endringer paa tvers av alle selskaper (activity feed)
+- **Per selskap**: Tidslinje over transaksjoner, graf over aksjonaersammensetning over tid
+- **Per aksjonaer**: Alle transaksjoner, eierandelsutvikling, kostpris-historikk
+- **Oversikt**: Activity feed paa dashboard — siste endringer paa tvers av alle selskaper
+- **Rapportgrunnlag**: Data strukturert slik det trengs for aarlig rapportering til aksjonaerregisteret
 
-### 4. Import-forbedringer
+## Capabilities
 
-- **Preview-steg**: Vis diff foer import bekreftes (nye/endrede/fjernede aksjonaerer)
-- **Batch-sammenligning**: Sammenlign to vilkaarlige importtidspunkter
-- **Historisk import**: Last inn eldre Excel-filer (med dato-parameter) for aa bygge historikk bakover
+Capabilities lister hva som skal spesifiseres i egne spec-filer:
+
+1. **snapshot-diff** — Bevar historiske snapshots ved re-import, beregn diff, vis preview
+2. **transaction-ledger** — Transaksjonsmodell med norske typer, metadata, validering
+3. **manual-registration** — UI for manuell registrering av alle transaksjonstyper
+4. **pdf-import** — Parser for dcompany.no PDF-eksporter av transaksjonshistorikk
+5. **history-views** — Tidslinjer, grafer, activity feed, rapportgrunnlag
 
 ## Phases
 
-Vi anbefaler en fasedelt tilnaerming:
-
-### Phase A: Snapshot & Diff (MVP)
-- Behold historiske snapshots ved re-import
-- Beregn og vis diff mellom to importer
-- Preview-steg i import-flyten
+### Phase A: Snapshot & Diff + Grunnleggende ledger
+- Ny DB-tabell: `snapshots` (bevarer historisk tilstand)
+- Ny DB-tabell: `transactions` (ledger)
+- Diff-beregning ved re-import (sammenligner naavarende holdings med ny fil)
+- Preview-steg i import-flyten: vis nye/endrede/fjernede aksjonaerer foer bekreftelse
+- Automatisk opprettelse av `import_diff`-transaksjoner fra diff
 - Grunnleggende tidslinje per selskap
+- Stotte for aa importere eldre filer med dato for aa bygge historikk bakover
 
-### Phase B: Transaksjonsmodell
-- DB-schema for transaksjoner
-- Automatisk transaksjonsutledning fra diffs
-- Transaksjonshistorikk per aksjonaer
+### Phase B: Manuell registrering + PDF-import
+- UI for manuell registrering av transaksjoner (emisjon, salg, splitt, osv.)
+- Validering: forretningsregler per transaksjonstype
+- PDF-parser for dcompany.no transaksjonshistorikk
+- Transaksjoner oppdaterer holdings-tabellen automatisk
 - Activity feed paa dashboard
 
-### Phase C: Manuell registrering
-- UI for aa registrere manuelle transaksjoner (emisjoner, salg, splitter)
-- Validering mot eksisterende data (kan ikke selge mer enn man har)
-- Stoetle for ulike transaksjonstyper med tilpassede skjemaer
-
-### Phase D: Avansert historikk
-- Grafer over eierandelsutvikling over tid
-- Historisk import (eldre filer med dato)
-- Eksport av transaksjonshistorikk
+### Phase C: Avansert historikk og rapportering
+- Grafer over eierandelsutvikling over tid (per selskap og per aksjonaer)
 - Sammenligning mellom vilkaarlige tidspunkter
+- Eksport av transaksjonshistorikk (CSV, PDF)
+- Rapportgrunnlag for aksjonaerregisteret (skatteetaten.no-format)
 
 ## Constraints
 
 - Excel-filene fra dcompany.no har ikke endringsinformasjon — all diff-logikk maa utledes fra sammenligning av snapshots
-- Datoer for endringer mellom to importer er ukjente (vi vet bare "mellom import A og import B skjedde dette")
-- Manuelt registrerte transaksjoner maa kunne sameksistere med import-utledede
-- Eksisterende funksjonalitet (visninger, soek, struktur) skal ikke brekke
+- Datoer for endringer mellom to importer er ukjente med mindre brukeren angir dato eksplisitt
+- Manuelt registrerte transaksjoner maa sameksistere med import-utledede uten konflikter
+- En transaksjon skal aldri kunne bryte konsistensen i holdings (f.eks. negativ aksjebeholdning)
+- Eksisterende funksjonalitet (visninger, soek, struktur, entity resolution) skal ikke brekke
+- PDF-formatet fra dcompany.no kan variere — parser maa vaere robust og flagge usikkerhet
+
+## Impact
+
+- **Eksisterende import**: Endres fra "overskriv" til "diff + bekreft". Ikke-destruktiv.
+- **Holdings-tabellen**: Faar ny kolonne for snapshot-referanse. Eksisterende data beholdes som foerste snapshot.
+- **Dashboard**: Utvides med activity feed.
+- **Selskapssider**: Faar ny "Historikk"-fane.
+- **Aksjonaersider**: Faar transaksjonshistorikk.
 
 ## Out of Scope (for naa)
 
-- Integrasjon med Broennoeysundregistrene eller Altinn for automatisk henting
+- Integrasjon med Broennoeysundregistrene eller Altinn for automatisk henting/rapportering
 - Digital signering eller juridisk gyldige aksjeeierbokfoersel
-- Multi-bruker med tilgangskontroll (kan komme senere)
+- Multi-bruker med tilgangskontroll
 - Automatisk varsling ved eierskapsendringer
+- Skattemessig inngangsverdi-beregning (FIFO/gjennomsnitt)

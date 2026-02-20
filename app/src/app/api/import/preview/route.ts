@@ -1,13 +1,12 @@
-import { importExcelFile, confirmImport } from "@/lib/import/importer";
+import { previewImport } from "@/lib/import/importer";
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * Upload and import an Excel file from dcompany.no.
- * Accepts multipart/form-data with a single "file" field.
+ * Preview an import: parse Excel and return diff against current DB state.
+ * No database writes — safe to call repeatedly.
  *
- * Query params:
- *  - confirmed=true: Use the new flow (snapshot + import + transactions)
- *  - (default): Use legacy import (backward compatible, no diff/snapshot)
+ * Accepts multipart/form-data with a single "file" field.
+ * Returns the ImportDiff for UI preview.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -31,22 +30,14 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const url = new URL(request.url);
-    const confirmed = url.searchParams.get("confirmed") === "true";
+    const result = await previewImport(buffer, file.name);
 
-    if (confirmed) {
-      const result = await confirmImport(buffer, file.name);
-      return NextResponse.json(result);
-    }
-
-    // Legacy flow
-    const result = await importExcelFile(buffer, file.name);
     return NextResponse.json(result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("Import error:", message);
+    console.error("Preview error:", message);
     return NextResponse.json(
-      { error: `Import failed: ${message}` },
+      { error: `Preview failed: ${message}` },
       { status: 500 }
     );
   }
