@@ -82,7 +82,7 @@ export function ShareholderTable({
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle className="text-base">Shareholders</CardTitle>
             <CardDescription>
@@ -129,19 +129,20 @@ export function ShareholderTable({
         </div>
       </CardHeader>
       <CardContent>
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Shareholder</TableHead>
-              <TableHead>Type</TableHead>
+              <TableHead className="hidden sm:table-cell">Type</TableHead>
               <TableHead className="text-right">Shares</TableHead>
               {!filter && (
                 <>
                   <TableHead className="text-right">Ownership</TableHead>
-                  <TableHead className="text-right">Voting Power</TableHead>
+                  <TableHead className="hidden md:table-cell text-right">Voting Power</TableHead>
                 </>
               )}
-              {!filter && <TableHead>Share Classes</TableHead>}
+              {!filter && <TableHead className="hidden lg:table-cell">Share Classes</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -170,7 +171,7 @@ export function ShareholderTable({
                       </p>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <Badge variant="secondary" className="text-xs">
                       {sh.entityType === "company" ? "Company" : "Person"}
                     </Badge>
@@ -183,13 +184,13 @@ export function ShareholderTable({
                       <TableCell className="text-right">
                         {formatPct(sh.ownershipPct)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="hidden md:table-cell text-right">
                         {formatPct(sh.votingPowerPct)}
                       </TableCell>
                     </>
                   )}
                   {!filter && (
-                    <TableCell>
+                    <TableCell className="hidden lg:table-cell">
                       <div className="flex flex-wrap gap-1">
                         {sh.holdings.map((h) => (
                           <Badge
@@ -208,6 +209,7 @@ export function ShareholderTable({
             )}
           </TableBody>
         </Table>
+        </div>
       </CardContent>
     </Card>
   );

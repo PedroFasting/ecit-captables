@@ -220,16 +220,17 @@ export function TransactionHistory({ companyId }: { companyId: string }) {
                   <Calendar className="size-3" />
                   {formatDate(date)}
                 </div>
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[140px]">Type</TableHead>
                       <TableHead>Beskrivelse</TableHead>
-                      <TableHead>Aksjeslag</TableHead>
+                      <TableHead className="hidden sm:table-cell">Aksjeslag</TableHead>
                       <TableHead className="text-right">Aksjer</TableHead>
-                      <TableHead className="text-right">Før</TableHead>
-                      <TableHead className="text-right">Etter</TableHead>
-                      <TableHead>Kilde</TableHead>
+                      <TableHead className="hidden md:table-cell text-right">Før</TableHead>
+                      <TableHead className="hidden md:table-cell text-right">Etter</TableHead>
+                      <TableHead className="hidden lg:table-cell">Kilde</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -248,19 +249,19 @@ export function TransactionHistory({ companyId }: { companyId: string }) {
                           <TableCell className="max-w-[300px] truncate text-sm">
                             {t.description ?? "—"}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
                             {t.shareClassName ?? "—"}
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">
                             {t.numShares.toLocaleString("nb-NO")}
                           </TableCell>
-                          <TableCell className="text-right font-mono text-sm text-muted-foreground">
+                          <TableCell className="hidden md:table-cell text-right font-mono text-sm text-muted-foreground">
                             {t.sharesBefore?.toLocaleString("nb-NO") ?? "—"}
                           </TableCell>
-                          <TableCell className="text-right font-mono text-sm">
+                          <TableCell className="hidden md:table-cell text-right font-mono text-sm">
                             {t.sharesAfter?.toLocaleString("nb-NO") ?? "—"}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden lg:table-cell">
                             <SourceBadge source={t.source} />
                           </TableCell>
                         </TableRow>
@@ -268,6 +269,7 @@ export function TransactionHistory({ companyId }: { companyId: string }) {
                     })}
                   </TableBody>
                 </Table>
+                </div>
               </div>
             ))}
           </div>

@@ -328,3 +328,15 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
     references: [importBatches.id],
   }),
 }));
+
+// ── Company Deletions (audit log) ──────────────────────
+
+export const companyDeletions = pgTable("company_deletions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyName: text("company_name").notNull(),
+  orgNumber: text("org_number").notNull(),
+  reason: text("reason").notNull(),
+  deletedBy: text("deleted_by"),
+  metadata: jsonb("metadata"), // snapshot of company stats at time of deletion
+  deletedAt: timestamp("deleted_at").defaultNow().notNull(),
+});

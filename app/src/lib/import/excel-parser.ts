@@ -1,9 +1,12 @@
 /**
  * Excel parser for dcompany.no shareholder register exports.
  *
- * Handles two formats:
- *  1. Single share class (e.g. "Common shares") - header row at ~11
- *  2. Multiple share classes (e.g. A/B/Preference) - header row at ~31
+ * Layout-independent: scans the entire file to find structures rather
+ * than relying on hardcoded row positions. Handles:
+ *  1. Single share class (e.g. "Common shares")
+ *  2. Multiple share classes (e.g. A/B/Preference)
+ *  3. Norwegian and English language exports
+ *  4. Files with extra/missing rows, manual edits, etc.
  *
  * Robust column matching: supports Norwegian + English headers,
  * common abbreviations, and fuzzy matching (trim, lowercase, ignore punctuation).
@@ -194,53 +197,69 @@ export function parseExcelFile(buffer: Buffer): ParsedCompany {
     }
   );
 
-  // Parse company info from row 2
+  // Parse company info (scans all rows for Name (orgnr) pattern)
   const companyInfo = parseCompanyInfo(rows);
 
-  // Parse share classes from header section
-  const shareClasses = parseShareClasses(rows);
+  // Find header row (scan all rows starting after company info)
+  const headerRowIndex = findHeaderRow(rows, companyInfo.companyRowIndex + 1);
+  if (headerRowIndex === -1) {
+    // Build debug info: show first non-empty values in column A
+    const sampleValues = rows
+      .map((r, i) => ({ row: i, val: r?.[0]?.toString()?.trim() }))
+      .filter((r) => r.val)
+      .slice(0, 12)
+      .map((r) => `  row ${r.row}: "${r.val}"`)
+      .join("\n");
 
-  // Find remarks (between share classes and header row)
-  const remarks = parseRemarks(rows);
+    throw new Error(
+      `Could not find shareholder table header row in sheet "${sheetName}".\n` +
+      `Looking for a row containing any of [${COLUMN_ALIASES.name.join(", ")}] plus at least one other recognized column.\n` +
+      `Column A values found:\n${sampleValues}\n` +
+      `Total rows: ${rows.length}.\n` +
+      `This may mean the file is not a dcompany.no shareholder register export, ` +
+      `or the format has changed. Check that the shareholder table header row exists.`
+    );
+  }
+
+  // Parse share classes from the section between company info and header row
+  const shareClasses = parseShareClasses(rows, companyInfo.companyRowIndex, headerRowIndex);
+
+  // Find remarks (between company info and header row)
+  const remarks = parseRemarks(rows, companyInfo.companyRowIndex, headerRowIndex);
   if (remarks && shareClasses.length > 0) {
     // Try to match remark to correct share class by content.
     // E.g. "A-aksjeeier kan samlet maksimalt..." → A-shares
     const matchedClass = shareClasses.find((sc) => {
       const classPrefix = sc.name.replace(/-?shares$/i, "").trim(); // "A", "B", "Preference", "Common"
-      // Match patterns like "A-aksjeeier", "B-aksje", "Preference share" in the remark text
       const pattern = new RegExp(`\\b${classPrefix}[- ]?aksje`, "i");
       return pattern.test(remarks);
     });
     if (matchedClass) {
       matchedClass.remarks = remarks;
     } else {
-      // Fallback: attach to first share class (most relevant for general remarks)
       shareClasses[0].remarks = remarks;
     }
   }
 
-  // Find header row and parse shareholders
-  const headerRowIndex = findHeaderRow(rows);
-  if (headerRowIndex === -1) {
-    // Build debug info: show first non-empty values in column A
-    const sampleValues = rows
-      .slice(0, 50)
-      .map((r, i) => ({ row: i, val: r?.[0]?.toString()?.trim() }))
-      .filter((r) => r.val)
-      .slice(0, 8)
-      .map((r) => `  row ${r.row}: "${r.val}"`)
-      .join("\n");
+  const headers = rows[headerRowIndex] as string[];
+  const shareholders = parseShareholders(rows, headerRowIndex, headers, shareClasses);
 
+  // Validation: ensure we got meaningful data
+  if (!companyInfo.name) {
     throw new Error(
-      `Could not find header row in sheet "${sheetName}".\n` +
-      `Looking for any of: ${COLUMN_ALIASES.name.join(", ")}\n` +
-      `First column values found:\n${sampleValues}\n` +
-      `Total rows: ${rows.length}. Check that the shareholder table header row exists.`
+      `Could not find company name in sheet "${sheetName}".\n` +
+      `Expected a row containing "Company Name (org number)" in column A.\n` +
+      `Total rows: ${rows.length}. The file may be empty or not a dcompany.no export.`
     );
   }
 
-  const headers = rows[headerRowIndex] as string[];
-  const shareholders = parseShareholders(rows, headerRowIndex, headers, shareClasses);
+  if (shareholders.length === 0) {
+    throw new Error(
+      `Found header row at row ${headerRowIndex + 1} but no shareholder data rows after it in sheet "${sheetName}".\n` +
+      `Company: "${companyInfo.name}".\n` +
+      `The file may be empty or the shareholder data may be in an unexpected format.`
+    );
+  }
 
   return {
     name: companyInfo.name,
@@ -256,27 +275,54 @@ export function parseExcelFile(buffer: Buffer): ParsedCompany {
 
 // ── Company Info ───────────────────────────────────────
 
-function parseCompanyInfo(rows: (string | number | Date | null)[][]) {
-  // Row 2 contains "COMPANY NAME (org number)"
+function parseCompanyInfo(rows: (string | number | Date | null)[][]): {
+  name: string;
+  orgNumber: string;
+  totalShares: number | null;
+  totalVotes: number | null;
+  nominalValue: number | null;
+  shareCapital: number | null;
+  companyRowIndex: number;
+} {
+  // Scan all rows for the "COMPANY NAME (org number)" pattern.
   // Org numbers may have country prefixes: NO, SE, DK, IS, FI, etc.
-  const companyRow = rows[2]?.[0]?.toString() ?? "";
-  const match = companyRow.match(/^(.+?)\s*\(([A-Z]{0,2}\s*\d[\d\s]*\d)\)\s*$/);
-
-  let name = companyRow;
+  let name = "";
   let orgNumber = "";
+  let companyRowIndex = -1;
 
-  if (match) {
-    name = match[1].trim();
-    orgNumber = match[2].replace(/\s/g, "");
+  for (let i = 0; i < rows.length; i++) {
+    const cellValue = rows[i]?.[0]?.toString()?.trim() ?? "";
+    if (!cellValue) continue;
+    const match = cellValue.match(/^(.+?)\s*\(([A-Z]{0,2}\s*\d[\d\s]*\d)\)\s*$/);
+    if (match) {
+      name = match[1].trim();
+      orgNumber = match[2].replace(/\s/g, "");
+      companyRowIndex = i;
+      break;
+    }
   }
 
-  // Parse total share capital info (rows 4-8 area)
+  if (companyRowIndex === -1) {
+    // Fallback: use first non-empty row as company name (no orgnr found)
+    for (let i = 0; i < rows.length; i++) {
+      const cellValue = rows[i]?.[0]?.toString()?.trim() ?? "";
+      if (cellValue) {
+        name = cellValue;
+        companyRowIndex = i;
+        break;
+      }
+    }
+  }
+
+  // Scan rows after the company row for field labels (up to 10 rows ahead)
   let totalShares: number | null = null;
   let totalVotes: number | null = null;
   let nominalValue: number | null = null;
   let shareCapital: number | null = null;
 
-  for (let i = 4; i < Math.min(rows.length, 10); i++) {
+  const searchStart = companyRowIndex + 1;
+  const searchEnd = Math.min(rows.length, searchStart + 10);
+  for (let i = searchStart; i < searchEnd; i++) {
     const label = rows[i]?.[0]?.toString() ?? "";
     const value = rows[i]?.[1];
     const field = resolveCompanyField(label);
@@ -287,17 +333,23 @@ function parseCompanyInfo(rows: (string | number | Date | null)[][]) {
     else if (field === "num_votes") totalVotes = toNumber(value);
   }
 
-  return { name, orgNumber, totalShares, totalVotes, nominalValue, shareCapital };
+  return { name, orgNumber, totalShares, totalVotes, nominalValue, shareCapital, companyRowIndex };
 }
 
 // ── Share Classes ──────────────────────────────────────
 
 function parseShareClasses(
-  rows: (string | number | Date | null)[][]
+  rows: (string | number | Date | null)[][],
+  companyRowIndex: number,
+  headerRowIndex: number
 ): ParsedShareClass[] {
   const classes: ParsedShareClass[] = [];
 
-  for (let i = 0; i < Math.min(rows.length, 40); i++) {
+  // Scan between company info and the header row
+  const searchStart = Math.max(companyRowIndex + 1, 0);
+  const searchEnd = headerRowIndex > 0 ? headerRowIndex : rows.length;
+
+  for (let i = searchStart; i < searchEnd; i++) {
     const label = rows[i]?.[0]?.toString() ?? "";
     const resolved = resolveShareClassName(label);
     const companyField = resolveCompanyField(label);
@@ -339,8 +391,15 @@ function parseShareClasses(
 
 // ── Remarks ────────────────────────────────────────────
 
-function parseRemarks(rows: (string | number | Date | null)[][]): string | null {
-  for (let i = 0; i < Math.min(rows.length, 40); i++) {
+function parseRemarks(
+  rows: (string | number | Date | null)[][],
+  companyRowIndex: number,
+  headerRowIndex: number
+): string | null {
+  const searchStart = Math.max(companyRowIndex + 1, 0);
+  const searchEnd = headerRowIndex > 0 ? headerRowIndex : rows.length;
+
+  for (let i = searchStart; i < searchEnd; i++) {
     const label = rows[i]?.[0]?.toString() ?? "";
     const field = resolveCompanyField(label);
     if (field === "remarks" || normalizeHeader(label) === "remarks") {
@@ -356,19 +415,28 @@ function parseRemarks(rows: (string | number | Date | null)[][]): string | null 
 
 // ── Header Row Detection ───────────────────────────────
 
-function findHeaderRow(rows: (string | number | Date | null)[][]): number {
-  // Look for a row containing a cell that matches "name" aliases.
-  // This is the shareholder table header row.
-  for (let i = 0; i < Math.min(rows.length, 50); i++) {
+function findHeaderRow(rows: (string | number | Date | null)[][], startFrom: number = 0): number {
+  // Scan ALL rows (from startFrom) for a row containing a cell matching "name" aliases.
+  // To reduce false positives, we also require at least one other recognized column
+  // in the same row (e.g. org_dob, num_shares, ownership).
+  for (let i = startFrom; i < rows.length; i++) {
     const row = rows[i];
     if (!row) continue;
+
+    let hasNameCol = false;
+    let otherRecognizedCols = 0;
+
     for (let j = 0; j < row.length; j++) {
       const val = row[j]?.toString().trim();
       if (!val) continue;
       const resolved = resolveColumnAlias(val);
-      if (resolved === "name") {
-        return i;
-      }
+      if (resolved === "name") hasNameCol = true;
+      else if (resolved) otherRecognizedCols++;
+    }
+
+    // Require "name" + at least 1 other recognized column to be a valid header row
+    if (hasNameCol && otherRecognizedCols >= 1) {
+      return i;
     }
   }
   return -1;
@@ -398,22 +466,21 @@ function parseShareholders(
   // Detect share class columns (they appear as column headers matching class names)
   const classColumns = detectClassColumns(headers, shareClasses);
 
+  // Use the "name" column position from colMap (not hardcoded to col 0)
+  const nameColIdx = col(colMap, "name");
+  const nameCol = nameColIdx >= 0 ? nameColIdx : 0; // fallback to 0 if not found
+
   for (let i = headerRowIndex + 1; i < rows.length; i++) {
     const row = rows[i];
-    if (!row || !row[0]) continue;
+    if (!row) continue;
 
-    const name = row[0]?.toString() ?? "";
+    const nameVal = row[nameCol]?.toString()?.trim() ?? "";
+
+    // Skip empty rows (tolerate gaps between header and data)
+    if (!nameVal) continue;
 
     // Skip footer rows
-    if (
-      name === "Total" ||
-      name === "Totalt" ||
-      name.startsWith("Exported") ||
-      name.startsWith("Eksportert") ||
-      name.startsWith("http")
-    ) {
-      continue;
-    }
+    if (isFooterRow(nameVal)) continue;
 
     const orgOrDob = row[col(colMap, "org_dob")]?.toString() ?? null;
     const isDateOfBirth = orgOrDob && /^\d{4}-\d{2}-\d{2}$/.test(orgOrDob);
@@ -434,7 +501,7 @@ function parseShareholders(
     }
 
     shareholders.push({
-      name,
+      name: nameVal,
       orgNumber: isDateOfBirth ? null : orgOrDob,
       dateOfBirth: isDateOfBirth ? orgOrDob : null,
       email: row[col(colMap, "email")]?.toString() ?? null,
@@ -547,6 +614,20 @@ function detectClassColumns(
 }
 
 // ── Helpers ────────────────────────────────────────────
+
+/** Check if a row is a footer/summary row (Total, Exported, URLs, etc.) */
+function isFooterRow(nameValue: string): boolean {
+  const lower = nameValue.toLowerCase().trim();
+  return (
+    lower === "total" ||
+    lower === "totalt" ||
+    lower.startsWith("exported") ||
+    lower.startsWith("eksportert") ||
+    lower.startsWith("http") ||
+    lower.startsWith("sum ") ||
+    lower === "sum"
+  );
+}
 
 /** Look up column index by canonical field name */
 function col(colMap: Map<string, number>, canonicalName: string): number {

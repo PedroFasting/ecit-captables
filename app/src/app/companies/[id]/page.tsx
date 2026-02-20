@@ -12,6 +12,7 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { ShareholderTable } from "./shareholder-table";
 import { CompanyTabs } from "./company-tabs";
+import { DeleteCompanyDialog } from "./delete-company-dialog";
 import { APP_LOCALE, formatPct, formatNumber } from "@/lib/utils";
 import {
   Card,
@@ -154,28 +155,35 @@ export default async function CompanyDetailPage({
           <ArrowLeft className="size-3" />
           Back to Companies
         </Link>
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-navy">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-semibold tracking-tight text-navy">
               {data.name}
             </h1>
             <p className="text-sm text-muted-foreground">
               Org. {data.orgNumber}
             </p>
           </div>
-          <a
-            href={`https://www.proff.no/selskap/-/-/${data.orgNumber.replace(/\s/g, "")}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-md border border-cream px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-beige"
-          >
-            Proff.no <ExternalLink className="size-3" />
-          </a>
+          <div className="flex shrink-0 items-center gap-2">
+            <a
+              href={`https://www.proff.no/selskap/-/-/${data.orgNumber.replace(/\s/g, "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-md border border-cream px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-beige"
+            >
+              Proff.no <ExternalLink className="size-3" />
+            </a>
+            <DeleteCompanyDialog
+              companyId={data.id}
+              companyName={data.name}
+              orgNumber={data.orgNumber}
+            />
+          </div>
         </div>
       </div>
 
       {/* Summary stats */}
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="pt-4">
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -227,6 +235,7 @@ export default async function CompanyDetailPage({
             <CardTitle className="text-base">Share Classes</CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -263,6 +272,7 @@ export default async function CompanyDetailPage({
                 ))}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       )}
