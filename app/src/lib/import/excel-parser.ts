@@ -132,8 +132,9 @@ export function parseExcelFile(buffer: Buffer): ParsedCompany {
 
 function parseCompanyInfo(rows: (string | number | Date | null)[][]) {
   // Row 2 contains "COMPANY NAME (org number)"
+  // Org numbers may have country prefixes: NO, SE, DK, IS, FI, etc.
   const companyRow = rows[2]?.[0]?.toString() ?? "";
-  const match = companyRow.match(/^(.+?)\s*\((\d[\d\s]*\d)\)\s*$/);
+  const match = companyRow.match(/^(.+?)\s*\(([A-Z]{0,2}\s*\d[\d\s]*\d)\)\s*$/);
 
   let name = companyRow;
   let orgNumber = "";

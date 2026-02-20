@@ -14,14 +14,9 @@ export function normalizeOrgNumber(orgNumber: string | null): string | null {
 
   let normalized = orgNumber.replace(/[\s-]/g, "");
 
-  // Swedish org numbers: keep SE prefix as-is
-  if (normalized.startsWith("SE")) {
-    return normalized;
-  }
-
-  // Danish org numbers: always normalize to "DK" prefix
-  // Danish CVR numbers are 8 digits; Norwegian are 9 digits
-  if (normalized.startsWith("DK")) {
+  // Country-prefixed org numbers: SE (Sweden), DK (Denmark), IS (Iceland), FI (Finland)
+  // Keep the prefix as-is for consistent identification
+  if (/^(SE|DK|IS|FI)[A-Z]?\d+$/.test(normalized)) {
     return normalized;
   }
 
