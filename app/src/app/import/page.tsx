@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, AlertTriangle } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -10,11 +10,19 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 
+interface ImportConflict {
+  type: "name_mismatch" | "email_mismatch" | "org_number_format" | "possible_wrong_org";
+  shareholderName: string;
+  orgNumber: string | null;
+  details: string;
+}
+
 interface ImportResult {
-  company?: string;
+  companyName?: string;
+  companyOrgNumber?: string;
   shareholdersImported?: number;
-  holdingsImported?: number;
-  conflictsFound?: number;
+  holdingsCreated?: number;
+  conflicts?: ImportConflict[];
   error?: string;
 }
 
@@ -133,7 +141,7 @@ export default function ImportPage() {
 
       {/* Result */}
       {result && (
-        <Card className="border-positive/30">
+        <Card className={result.conflicts?.some(c => c.type === "possible_wrong_org") ? "border-ecit-red/30" : "border-positive/30"}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base text-positive">
               <CheckCircle className="size-5" />
@@ -142,12 +150,12 @@ export default function ImportPage() {
           </CardHeader>
           <CardContent>
             <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              {result.company && (
+              {result.companyName && (
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     Company
                   </dt>
-                  <dd className="mt-1 font-medium">{result.company}</dd>
+                  <dd className="mt-1 font-medium">{result.companyName}</dd>
                 </div>
               )}
               {result.shareholdersImported != null && (
@@ -160,25 +168,25 @@ export default function ImportPage() {
                   </dd>
                 </div>
               )}
-              {result.holdingsImported != null && (
+              {result.holdingsCreated != null && (
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     Holdings
                   </dt>
                   <dd className="mt-1 text-lg font-semibold text-navy">
-                    {result.holdingsImported}
+                    {result.holdingsCreated}
                   </dd>
                 </div>
               )}
-              {result.conflictsFound != null && (
+              {result.conflicts != null && (
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     Conflicts
                   </dt>
                   <dd className="mt-1 text-lg font-semibold">
-                    {result.conflictsFound > 0 ? (
+                    {result.conflicts.length > 0 ? (
                       <span className="text-ecit-red">
-                        {result.conflictsFound}
+                        {result.conflicts.length}
                       </span>
                     ) : (
                       <span className="text-positive">0</span>
@@ -187,6 +195,62 @@ export default function ImportPage() {
                 </div>
               )}
             </dl>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Conflict details */}
+      {result?.conflicts && result.conflicts.length > 0 && (
+        <Card className="border-ecit-red/30">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base text-ecit-red">
+              <AlertTriangle className="size-5" />
+              Data Quality Warnings
+            </CardTitle>
+            <CardDescription>
+              Issues detected during import that may need review
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {result.conflicts
+              .sort((a, b) => (a.type === "possible_wrong_org" ? -1 : 1) - (b.type === "possible_wrong_org" ? -1 : 1))
+              .map((conflict, i) => (
+              <div
+                key={i}
+                className={`rounded-md border px-4 py-3 text-sm ${
+                  conflict.type === "possible_wrong_org"
+                    ? "border-ecit-red/30 bg-ecit-red/5"
+                    : "border-cream bg-beige-light"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
+                    conflict.type === "possible_wrong_org"
+                      ? "bg-ecit-red/10 text-ecit-red"
+                      : "bg-navy/10 text-navy"
+                  }`}>
+                    {conflict.type === "possible_wrong_org"
+                      ? "Wrong Org Nr"
+                      : conflict.type === "name_mismatch"
+                        ? "Name Mismatch"
+                        : conflict.type === "email_mismatch"
+                          ? "Email Mismatch"
+                          : "Format"}
+                  </span>
+                  <span className="font-medium text-navy">
+                    {conflict.shareholderName}
+                  </span>
+                  {conflict.orgNumber && (
+                    <span className="text-muted-foreground">
+                      ({conflict.orgNumber})
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-muted-foreground">
+                  {conflict.details}
+                </p>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}

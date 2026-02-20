@@ -36,7 +36,7 @@ export interface ImportResult {
 }
 
 export interface ImportConflict {
-  type: "name_mismatch" | "email_mismatch" | "org_number_format";
+  type: "name_mismatch" | "email_mismatch" | "org_number_format" | "possible_wrong_org";
   shareholderName: string;
   orgNumber: string | null;
   details: string;
@@ -198,7 +198,7 @@ async function importShareholder(
   const normalizedName = normalizeNameForComparison(parsed.name);
 
   // Try to find existing shareholder
-  let shareholder = await findExistingShareholder(
+  let match = await findExistingShareholder(
     tx,
     normalizedOrg,
     parsed.dateOfBirth,
@@ -206,22 +206,43 @@ async function importShareholder(
     entityType
   );
 
+  // Cross-validate: if org-number matched but name differs significantly,
+  // check if the org belongs to a different known entity and try name-based match
+  if (match && match.matchedBy === "org_number" && normalizedOrg) {
+    match = await crossValidateOrgMatch(
+      tx,
+      match,
+      parsed.name,
+      normalizedName,
+      normalizedOrg,
+      entityType,
+      conflicts
+    );
+  }
+
+  let shareholder = match?.shareholder ?? null;
+
   if (shareholder) {
-    // Check for conflicts
+    // Check for conflicts (name mismatch that wasn't caught by cross-validation)
     const existingNormalized = normalizeNameForComparison(
       shareholder.canonicalName
     );
     if (existingNormalized !== normalizedName) {
-      // Name differs but org matches - auto-merge casing, flag significant diffs
       const isCasingOnly =
         existingNormalized.toLowerCase() === normalizedName.toLowerCase();
       if (!isCasingOnly) {
-        conflicts.push({
-          type: "name_mismatch",
-          shareholderName: parsed.name,
-          orgNumber: normalizedOrg,
-          details: `Existing: "${shareholder.canonicalName}", New: "${parsed.name}"`,
-        });
+        // Only add name_mismatch if we didn't already flag as possible_wrong_org
+        const alreadyFlagged = conflicts.some(
+          (c) => c.type === "possible_wrong_org" && c.shareholderName === parsed.name
+        );
+        if (!alreadyFlagged) {
+          conflicts.push({
+            type: "name_mismatch",
+            shareholderName: parsed.name,
+            orgNumber: normalizedOrg,
+            details: `Existing: "${shareholder.canonicalName}", New: "${parsed.name}"`,
+          });
+        }
       }
     }
 
@@ -387,13 +408,18 @@ async function importShareholder(
 
 // ── Entity Resolution: Find Existing Shareholder ───────
 
+interface MatchResult {
+  shareholder: typeof shareholders.$inferSelect;
+  matchedBy: "org_number" | "date_of_birth" | "name";
+}
+
 async function findExistingShareholder(
   tx: Tx,
   orgNumber: string | null,
   dateOfBirth: string | null,
   normalizedName: string,
   entityType: "company" | "person"
-) {
+): Promise<MatchResult | null> {
   // Strategy 1: Match on org number (most reliable)
   if (orgNumber) {
     const byOrg = await tx
@@ -402,7 +428,7 @@ async function findExistingShareholder(
       .where(eq(shareholders.orgNumber, orgNumber))
       .limit(1);
 
-    if (byOrg.length > 0) return byOrg[0];
+    if (byOrg.length > 0) return { shareholder: byOrg[0], matchedBy: "org_number" };
   }
 
   // Strategy 2: Match on date of birth + similar name (for persons)
@@ -415,14 +441,14 @@ async function findExistingShareholder(
 
     for (const s of byDob) {
       if (normalizeNameForComparison(s.canonicalName) === normalizedName) {
-        return s;
+        return { shareholder: s, matchedBy: "date_of_birth" };
       }
     }
   }
 
-  // Strategy 3: Match on normalized name + entity type (fallback for persons
+  // Strategy 3: Match on normalized name + entity type (fallback for entities
   // without org_number or date_of_birth). Less reliable than strategies 1-2
-  // but prevents creating duplicates for the same person across files.
+  // but prevents creating duplicates for the same entity across files.
   if (!orgNumber && !dateOfBirth) {
     const byName = await tx
       .select()
@@ -435,8 +461,80 @@ async function findExistingShareholder(
       )
       .limit(1);
 
-    if (byName.length > 0) return byName[0];
+    if (byName.length > 0) return { shareholder: byName[0], matchedBy: "name" };
   }
 
   return null;
+}
+
+/**
+ * Cross-validate: when org-number matched a shareholder with a very different name,
+ * check if the org number belongs to a known company with a different name.
+ * If so, try to find the correct shareholder by name instead.
+ *
+ * This catches errors where the source data (e.g. dcompany.no) has a wrong org number
+ * next to a shareholder name.
+ */
+async function crossValidateOrgMatch(
+  tx: Tx,
+  match: MatchResult,
+  importedName: string,
+  normalizedName: string,
+  orgNumber: string,
+  entityType: "company" | "person",
+  conflicts: ImportConflict[]
+): Promise<MatchResult> {
+  const existingNormalized = normalizeNameForComparison(match.shareholder.canonicalName);
+
+  // If names are similar (just casing), the match is fine
+  if (existingNormalized.toLowerCase() === normalizedName.toLowerCase()) {
+    return match;
+  }
+
+  // Names differ significantly — check if the org number belongs to a known company
+  const knownCompany = await tx
+    .select()
+    .from(companies)
+    .where(eq(companies.orgNumber, orgNumber))
+    .limit(1);
+
+  const orgBelongsToOtherCompany =
+    knownCompany.length > 0 &&
+    normalizeNameForComparison(knownCompany[0].name).toLowerCase() !== normalizedName.toLowerCase();
+
+  // Try to find a shareholder that matches by name instead
+  const byName = await tx
+    .select()
+    .from(shareholders)
+    .where(
+      and(
+        eq(shareholders.entityType, entityType),
+        sql`lower(trim(${shareholders.canonicalName})) = ${normalizedName}`
+      )
+    )
+    .limit(1);
+
+  if (byName.length > 0 && byName[0].id !== match.shareholder.id) {
+    // Found the correct shareholder by name — the org number in the source is wrong
+    conflicts.push({
+      type: "possible_wrong_org",
+      shareholderName: importedName,
+      orgNumber,
+      details: `Source has org ${orgNumber} (belongs to "${match.shareholder.canonicalName}") but name "${importedName}" matches existing shareholder with org ${byName[0].orgNumber}. Using name match instead.`,
+    });
+    return { shareholder: byName[0], matchedBy: "name" };
+  }
+
+  if (orgBelongsToOtherCompany) {
+    // Org belongs to a different known company and we didn't find a name match —
+    // still flag it as suspicious but use the org match as fallback
+    conflicts.push({
+      type: "possible_wrong_org",
+      shareholderName: importedName,
+      orgNumber,
+      details: `Source has org ${orgNumber} (belongs to company "${knownCompany[0].name}") but imported name is "${importedName}". Org number in source may be wrong.`,
+    });
+  }
+
+  return match;
 }
