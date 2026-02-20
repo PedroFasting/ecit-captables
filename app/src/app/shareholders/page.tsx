@@ -4,11 +4,6 @@ import { shareholders, holdings } from "@/db/schema";
 import { eq, sql, ilike, or, and } from "drizzle-orm";
 import Link from "next/link";
 import { Building2, User, SearchX } from "lucide-react";
-
-export const dynamic = "force-dynamic";
-export const metadata: Metadata = {
-  title: "Shareholders - ECIT Cap Tables",
-};
 import {
   Card,
   CardContent,
@@ -16,6 +11,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ShareholderSearch } from "./search";
 import { APP_LOCALE } from "@/lib/utils";
+
+export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Shareholders - ECIT Cap Tables",
+};
 
 async function getShareholders(search?: string, type?: string) {
   const conditions = [];

@@ -9,13 +9,6 @@ import {
 import { eq, sql, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { Wrench, AlertTriangle, Mail, Building2 } from "lucide-react";
-
-export const dynamic = "force-dynamic";
-
-export const metadata: Metadata = {
-  title: "Data Cleanup | ECIT Cap Tables",
-  description: "Review and resolve entity resolution conflicts",
-};
 import {
   Card,
   CardContent,
@@ -24,6 +17,13 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Data Cleanup | ECIT Cap Tables",
+  description: "Review and resolve entity resolution conflicts",
+};
 
 async function getConflicts() {
   const conflicting = await db

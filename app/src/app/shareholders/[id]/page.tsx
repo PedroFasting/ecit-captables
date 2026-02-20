@@ -12,7 +12,23 @@ import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Building2, User, Mail, Phone, MapPin } from "lucide-react";
-import { APP_LOCALE } from "@/lib/utils";
+import { APP_LOCALE, formatPct } from "@/lib/utils";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export const dynamic = "force-dynamic";
 
@@ -34,22 +50,6 @@ export async function generateMetadata({
       : "Shareholder Not Found | ECIT Cap Tables",
   };
 }
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 async function getShareholderDetail(id: string) {
   const shareholder = await db
@@ -136,13 +136,6 @@ async function getShareholderDetail(id: string) {
     contacts,
     companies: Array.from(companiesMap.values()),
   };
-}
-
-function formatPct(pct: string | null | undefined): string {
-  if (pct == null) return "—";
-  const n = parseFloat(pct);
-  if (isNaN(n)) return "—";
-  return `${n.toFixed(2)}%`;
 }
 
 export default async function ShareholderDetailPage({

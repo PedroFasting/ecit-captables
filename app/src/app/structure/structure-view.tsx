@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { APP_LOCALE } from "@/lib/utils";
+import { APP_LOCALE, formatPct } from "@/lib/utils";
 
 interface StructureNode {
   id: string;
@@ -51,13 +51,6 @@ interface StructureData {
     totalShares: number;
     ownershipPct: string | null;
   }[];
-}
-
-function formatPct(pct: string | null): string {
-  if (!pct) return "";
-  const n = parseFloat(pct);
-  if (isNaN(n)) return "";
-  return `${n.toFixed(2)}%`;
 }
 
 export function StructureView({ data }: { data: StructureData }) {

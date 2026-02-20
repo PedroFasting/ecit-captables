@@ -1,12 +1,5 @@
 import type { Metadata } from "next";
 import { db } from "@/db";
-
-export const dynamic = "force-dynamic";
-
-export const metadata: Metadata = {
-  title: "Dashboard | ECIT Cap Tables",
-  description: "Overview of shareholder ownership across the ECIT Group",
-};
 import {
   companies,
   shareholders,
@@ -14,7 +7,7 @@ import {
   shareClasses,
   importBatches,
 } from "@/db/schema";
-import { eq, sql, desc } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   Building2,
   Users,
@@ -33,6 +26,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Dashboard | ECIT Cap Tables",
+  description: "Overview of shareholder ownership across the ECIT Group",
+};
 
 async function getStats() {
   const [companiesCount] = await db

@@ -64,47 +64,56 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Move all holdings
-    const movedHoldings = await db
-      .update(holdings)
-      .set({ shareholderId: keepId })
-      .where(eq(holdings.shareholderId, mergeId))
-      .returning();
+    // Perform merge in a transaction for atomicity
+    const result = await db.transaction(async (tx) => {
+      // Move all holdings
+      const movedHoldings = await tx
+        .update(holdings)
+        .set({ shareholderId: keepId })
+        .where(eq(holdings.shareholderId, mergeId))
+        .returning();
 
-    // Move all aliases
-    const movedAliases = await db
-      .update(shareholderAliases)
-      .set({ shareholderId: keepId })
-      .where(eq(shareholderAliases.shareholderId, mergeId))
-      .returning();
+      // Move all aliases
+      const movedAliases = await tx
+        .update(shareholderAliases)
+        .set({ shareholderId: keepId })
+        .where(eq(shareholderAliases.shareholderId, mergeId))
+        .returning();
 
-    // Move all contacts
-    const movedContacts = await db
-      .update(shareholderContacts)
-      .set({ shareholderId: keepId })
-      .where(eq(shareholderContacts.shareholderId, mergeId))
-      .returning();
+      // Move all contacts
+      const movedContacts = await tx
+        .update(shareholderContacts)
+        .set({ shareholderId: keepId })
+        .where(eq(shareholderContacts.shareholderId, mergeId))
+        .returning();
 
-    // Add the merged shareholder's name as an alias
-    await db.insert(shareholderAliases).values({
-      shareholderId: keepId,
-      nameVariant: merge.canonicalName,
-      email: null,
-      sourceCompanyId: null,
+      // Add the merged shareholder's name as an alias
+      await tx.insert(shareholderAliases).values({
+        shareholderId: keepId,
+        nameVariant: merge.canonicalName,
+        email: null,
+        sourceCompanyId: null,
+      });
+
+      // Delete the merged shareholder
+      await tx
+        .delete(shareholders)
+        .where(eq(shareholders.id, mergeId));
+
+      return {
+        movedHoldings: movedHoldings.length,
+        movedAliases: movedAliases.length,
+        movedContacts: movedContacts.length,
+      };
     });
-
-    // Delete the merged shareholder
-    await db
-      .delete(shareholders)
-      .where(eq(shareholders.id, mergeId));
 
     return NextResponse.json({
       message: `Merged "${merge.canonicalName}" into "${keep.canonicalName}"`,
       kept: { id: keepId, name: keep.canonicalName },
       merged: { id: mergeId, name: merge.canonicalName },
-      movedHoldings: movedHoldings.length,
-      movedAliases: movedAliases.length,
-      movedContacts: movedContacts.length,
+      movedHoldings: result.movedHoldings,
+      movedAliases: result.movedAliases,
+      movedContacts: result.movedContacts,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

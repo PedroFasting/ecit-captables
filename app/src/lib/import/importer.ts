@@ -24,6 +24,9 @@ import {
 
 // ── Types ──────────────────────────────────────────────
 
+/** Transaction-capable database type (works with both db and tx) */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export interface ImportResult {
   companyName: string;
   companyOrgNumber: string;
@@ -46,69 +49,73 @@ export async function importExcelFile(
   fileName: string
 ): Promise<ImportResult> {
   const parsed = parseExcelFile(buffer);
-  const conflicts: ImportConflict[] = [];
 
-  // 1. Upsert company
-  const company = await upsertCompany(parsed);
+  return await db.transaction(async (tx) => {
+    const conflicts: ImportConflict[] = [];
 
-  // 2. Create import batch
-  const [batch] = await db
-    .insert(importBatches)
-    .values({
-      sourceFile: fileName,
-      companyId: company.id,
-      recordsImported: parsed.shareholders.length,
-      conflictsFound: 0, // Updated at the end
-    })
-    .returning();
+    // 1. Upsert company
+    const company = await upsertCompany(tx, parsed);
 
-  // 3. Upsert share classes
-  const classMap = await upsertShareClasses(parsed, company.id);
+    // 2. Create import batch
+    const [batch] = await tx
+      .insert(importBatches)
+      .values({
+        sourceFile: fileName,
+        companyId: company.id,
+        recordsImported: parsed.shareholders.length,
+        conflictsFound: 0, // Updated at the end
+      })
+      .returning();
 
-  // 4. Import shareholders with entity resolution
-  let holdingsCount = 0;
-  for (const sh of parsed.shareholders) {
-    const result = await importShareholder(
-      sh,
-      company.id,
-      classMap,
-      batch.id,
-      conflicts
-    );
-    holdingsCount += result.holdingsCreated;
-  }
+    // 3. Upsert share classes
+    const classMap = await upsertShareClasses(tx, parsed, company.id);
 
-  // 5. Update batch with conflict count
-  await db
-    .update(importBatches)
-    .set({ conflictsFound: conflicts.length })
-    .where(eq(importBatches.id, batch.id));
+    // 4. Import shareholders with entity resolution
+    let holdingsCount = 0;
+    for (const sh of parsed.shareholders) {
+      const result = await importShareholder(
+        tx,
+        sh,
+        company.id,
+        classMap,
+        batch.id,
+        conflicts
+      );
+      holdingsCount += result.holdingsCreated;
+    }
 
-  return {
-    companyName: parsed.name,
-    companyOrgNumber: parsed.orgNumber,
-    shareholdersImported: parsed.shareholders.length,
-    holdingsCreated: holdingsCount,
-    conflicts,
-  };
+    // 5. Update batch with conflict count
+    await tx
+      .update(importBatches)
+      .set({ conflictsFound: conflicts.length })
+      .where(eq(importBatches.id, batch.id));
+
+    return {
+      companyName: parsed.name,
+      companyOrgNumber: parsed.orgNumber,
+      shareholdersImported: parsed.shareholders.length,
+      holdingsCreated: holdingsCount,
+      conflicts,
+    };
+  });
 }
 
 // ── Company Upsert ─────────────────────────────────────
 
-async function upsertCompany(parsed: ParsedCompany) {
+async function upsertCompany(tx: Tx, parsed: ParsedCompany) {
   const orgNum = normalizeOrgNumber(parsed.orgNumber);
   if (!orgNum) {
     throw new Error(`Company has no org number: ${parsed.name}`);
   }
 
-  const existing = await db
+  const existing = await tx
     .select()
     .from(companies)
     .where(eq(companies.orgNumber, orgNum))
     .limit(1);
 
   if (existing.length > 0) {
-    await db
+    await tx
       .update(companies)
       .set({
         name: parsed.name,
@@ -122,7 +129,7 @@ async function upsertCompany(parsed: ParsedCompany) {
     return existing[0];
   }
 
-  const [company] = await db
+  const [company] = await tx
     .insert(companies)
     .values({
       name: parsed.name,
@@ -140,23 +147,24 @@ async function upsertCompany(parsed: ParsedCompany) {
 // ── Share Classes Upsert ───────────────────────────────
 
 async function upsertShareClasses(
+  tx: Tx,
   parsed: ParsedCompany,
   companyId: string
 ): Promise<Map<string, string>> {
   // Delete existing holdings for this company first (they reference share classes)
-  await db
+  await tx
     .delete(holdings)
     .where(eq(holdings.companyId, companyId));
 
   // Now safe to delete share classes
-  await db
+  await tx
     .delete(shareClasses)
     .where(eq(shareClasses.companyId, companyId));
 
   const classMap = new Map<string, string>(); // className -> classId
 
   for (const sc of parsed.shareClasses) {
-    const [created] = await db
+    const [created] = await tx
       .insert(shareClasses)
       .values({
         companyId,
@@ -178,6 +186,7 @@ async function upsertShareClasses(
 // ── Shareholder Import with Entity Resolution ──────────
 
 async function importShareholder(
+  tx: Tx,
   parsed: ParsedShareholder,
   companyId: string,
   classMap: Map<string, string>,
@@ -190,6 +199,7 @@ async function importShareholder(
 
   // Try to find existing shareholder
   let shareholder = await findExistingShareholder(
+    tx,
     normalizedOrg,
     parsed.dateOfBirth,
     normalizedName,
@@ -221,14 +231,14 @@ async function importShareholder(
       parsed.name,
     ]);
     if (bestName !== shareholder.canonicalName) {
-      await db
+      await tx
         .update(shareholders)
         .set({ canonicalName: bestName, updatedAt: new Date() })
         .where(eq(shareholders.id, shareholder.id));
     }
   } else {
     // Create new shareholder
-    const [created] = await db
+    const [created] = await tx
       .insert(shareholders)
       .values({
         canonicalName: parsed.name,
@@ -242,7 +252,7 @@ async function importShareholder(
   }
 
   // Add alias for this specific appearance (dedup: remove existing from same source first)
-  await db
+  await tx
     .delete(shareholderAliases)
     .where(
       and(
@@ -250,7 +260,7 @@ async function importShareholder(
         eq(shareholderAliases.sourceCompanyId, companyId)
       )
     );
-  await db.insert(shareholderAliases).values({
+  await tx.insert(shareholderAliases).values({
     shareholderId: shareholder.id,
     nameVariant: parsed.name,
     email: normalizeEmail(parsed.email),
@@ -263,7 +273,7 @@ async function importShareholder(
 
     // Check for email conflicts against other sources
     if (normalizedEmail) {
-      const existingContacts = await db
+      const existingContacts = await tx
         .select()
         .from(shareholderContacts)
         .where(eq(shareholderContacts.shareholderId, shareholder.id));
@@ -286,7 +296,7 @@ async function importShareholder(
     }
 
     // Upsert: check if identical contact already exists
-    const existingContact = await db
+    const existingContact = await tx
       .select()
       .from(shareholderContacts)
       .where(eq(shareholderContacts.shareholderId, shareholder.id));
@@ -299,7 +309,7 @@ async function importShareholder(
     );
 
     if (!alreadyExists) {
-      await db.insert(shareholderContacts).values({
+      await tx.insert(shareholderContacts).values({
         shareholderId: shareholder.id,
         email: normalizeEmail(parsed.email),
         phone: parsed.phone,
@@ -310,7 +320,7 @@ async function importShareholder(
   }
 
   // Delete existing holdings for this shareholder + company (re-import)
-  await db
+  await tx
     .delete(holdings)
     .where(
       and(
@@ -331,7 +341,7 @@ async function importShareholder(
       if (!ch.numShares || ch.numShares === 0) continue;
 
       const shareClassId = classMap.get(ch.className) ?? null;
-      await db.insert(holdings).values({
+      await tx.insert(holdings).values({
         shareholderId: shareholder.id,
         companyId,
         shareClassId,
@@ -355,7 +365,7 @@ async function importShareholder(
         ? classMap.values().next().value ?? null
         : null;
 
-    await db.insert(holdings).values({
+    await tx.insert(holdings).values({
       shareholderId: shareholder.id,
       companyId,
       shareClassId,
@@ -378,6 +388,7 @@ async function importShareholder(
 // ── Entity Resolution: Find Existing Shareholder ───────
 
 async function findExistingShareholder(
+  tx: Tx,
   orgNumber: string | null,
   dateOfBirth: string | null,
   normalizedName: string,
@@ -385,7 +396,7 @@ async function findExistingShareholder(
 ) {
   // Strategy 1: Match on org number (most reliable)
   if (orgNumber) {
-    const byOrg = await db
+    const byOrg = await tx
       .select()
       .from(shareholders)
       .where(eq(shareholders.orgNumber, orgNumber))
@@ -396,7 +407,7 @@ async function findExistingShareholder(
 
   // Strategy 2: Match on date of birth + similar name (for persons)
   if (dateOfBirth && entityType === "person") {
-    const byDob = await db
+    const byDob = await tx
       .select()
       .from(shareholders)
       .where(eq(shareholders.dateOfBirth, dateOfBirth))
@@ -413,7 +424,7 @@ async function findExistingShareholder(
   // without org_number or date_of_birth). Less reliable than strategies 1-2
   // but prevents creating duplicates for the same person across files.
   if (!orgNumber && !dateOfBirth) {
-    const byName = await db
+    const byName = await tx
       .select()
       .from(shareholders)
       .where(

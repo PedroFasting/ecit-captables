@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Layers, Filter } from "lucide-react";
+import { Layers } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { APP_LOCALE } from "@/lib/utils";
+import { formatPct, formatNumber } from "@/lib/utils";
 
 interface Holding {
   holdingId: string;
@@ -43,18 +43,6 @@ interface Shareholder {
 interface ShareClass {
   id: string;
   name: string;
-}
-
-function formatPct(pct: number | string | null | undefined): string {
-  if (pct == null) return "—";
-  const n = typeof pct === "string" ? parseFloat(pct) : pct;
-  if (isNaN(n)) return "—";
-  return `${n.toFixed(2)}%`;
-}
-
-function formatNumber(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return n.toLocaleString(APP_LOCALE);
 }
 
 export function ShareholderTable({
@@ -83,7 +71,7 @@ export function ShareholderTable({
           );
           return { ...sh, holdings: matchingHoldings, totalShares: classShares };
         })
-        .filter(Boolean as unknown as (v: Shareholder | null) => v is Shareholder)
+        .filter((v): v is Shareholder => v !== null)
         .sort((a, b) => b.totalShares - a.totalShares)
     : shareholders;
 

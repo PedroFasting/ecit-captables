@@ -4,11 +4,6 @@ import { companies, shareClasses, holdings, shareholders } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import Link from "next/link";
 import { Building2, SearchX } from "lucide-react";
-
-export const dynamic = "force-dynamic";
-export const metadata: Metadata = {
-  title: "Companies - ECIT Cap Tables",
-};
 import {
   Card,
   CardContent,
@@ -18,6 +13,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { CompanySearch } from "./search";
 import { APP_LOCALE } from "@/lib/utils";
+
+export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Companies - ECIT Cap Tables",
+};
 
 async function getCompanies(search?: string) {
   // Compute hierarchy depth using a recursive CTE on the ownership graph.
@@ -146,7 +146,7 @@ export default async function CompaniesPage({
                       {company.share_class_count}
                     </p>
                   </div>
-                  {company.total_shares && (
+                  {company.total_shares != null && (
                     <div className="text-right">
                       <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                         Total Shares

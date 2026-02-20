@@ -9,14 +9,7 @@ import {
 import { eq, sql, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { GitFork, Building2, User } from "lucide-react";
-import { APP_LOCALE } from "@/lib/utils";
-
-export const dynamic = "force-dynamic";
-
-export const metadata: Metadata = {
-  title: "Cross-Ownership | ECIT Cap Tables",
-  description: "Shareholders with holdings in multiple companies",
-};
+import { APP_LOCALE, formatPct } from "@/lib/utils";
 import {
   Card,
   CardContent,
@@ -25,6 +18,13 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Cross-Ownership | ECIT Cap Tables",
+  description: "Shareholders with holdings in multiple companies",
+};
 
 async function getCrossOwnership() {
   const crossOwners = await db
@@ -82,13 +82,6 @@ async function getCrossOwnership() {
     ...owner,
     holdings: holdingsByOwner.get(owner.id) ?? [],
   }));
-}
-
-function formatPct(pct: string | null): string {
-  if (!pct) return "—";
-  const n = parseFloat(pct);
-  if (isNaN(n)) return "—";
-  return `${n.toFixed(2)}%`;
 }
 
 export default async function CrossOwnershipPage() {

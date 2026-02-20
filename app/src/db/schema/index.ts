@@ -8,6 +8,7 @@ import {
   pgEnum,
   boolean,
   date,
+  index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -48,7 +49,9 @@ export const shareClasses = pgTable("share_classes", {
   shareCapital: numeric("share_capital", { precision: 20, scale: 2 }),
   totalVotes: bigint("total_votes", { mode: "number" }),
   remarks: text("remarks"),
-});
+}, (table) => [
+  index("share_classes_company_id_idx").on(table.companyId),
+]);
 
 export const shareClassesRelations = relations(
   shareClasses,
@@ -90,7 +93,9 @@ export const shareholderAliases = pgTable("shareholder_aliases", {
   nameVariant: text("name_variant").notNull(),
   email: text("email"),
   sourceCompanyId: uuid("source_company_id").references(() => companies.id),
-});
+}, (table) => [
+  index("shareholder_aliases_shareholder_id_idx").on(table.shareholderId),
+]);
 
 export const shareholderAliasesRelations = relations(
   shareholderAliases,
@@ -117,7 +122,9 @@ export const shareholderContacts = pgTable("shareholder_contacts", {
   phone: text("phone"),
   address: text("address"),
   isPrimary: boolean("is_primary").default(false),
-});
+}, (table) => [
+  index("shareholder_contacts_shareholder_id_idx").on(table.shareholderId),
+]);
 
 export const shareholderContactsRelations = relations(
   shareholderContacts,
@@ -151,7 +158,12 @@ export const holdings = pgTable("holdings", {
   importBatchId: uuid("import_batch_id").references(() => importBatches.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("holdings_shareholder_id_idx").on(table.shareholderId),
+  index("holdings_company_id_idx").on(table.companyId),
+  index("holdings_share_class_id_idx").on(table.shareClassId),
+  index("holdings_import_batch_id_idx").on(table.importBatchId),
+]);
 
 export const holdingsRelations = relations(holdings, ({ one }) => ({
   shareholder: one(shareholders, {
@@ -181,7 +193,9 @@ export const importBatches = pgTable("import_batches", {
   companyId: uuid("company_id").references(() => companies.id),
   recordsImported: bigint("records_imported", { mode: "number" }),
   conflictsFound: bigint("conflicts_found", { mode: "number" }),
-});
+}, (table) => [
+  index("import_batches_company_id_idx").on(table.companyId),
+]);
 
 export const importBatchesRelations = relations(
   importBatches,

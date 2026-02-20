@@ -11,7 +11,21 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { ShareholderTable } from "./shareholder-table";
-import { APP_LOCALE } from "@/lib/utils";
+import { APP_LOCALE, formatPct, formatNumber } from "@/lib/utils";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export const dynamic = "force-dynamic";
 
@@ -33,20 +47,6 @@ export async function generateMetadata({
       : "Company Not Found | ECIT Cap Tables",
   };
 }
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 async function getCompanyDetail(id: string) {
   const company = await db
@@ -130,18 +130,6 @@ async function getCompanyDetail(id: string) {
       (a, b) => b.totalShares - a.totalShares
     ),
   };
-}
-
-function formatPct(pct: number | string | null | undefined): string {
-  if (pct == null) return "—";
-  const n = typeof pct === "string" ? parseFloat(pct) : pct;
-  if (isNaN(n)) return "—";
-  return `${n.toFixed(2)}%`;
-}
-
-function formatNumber(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return n.toLocaleString(APP_LOCALE);
 }
 
 export default async function CompanyDetailPage({
